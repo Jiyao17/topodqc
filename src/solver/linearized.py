@@ -53,12 +53,12 @@ class LinearFormu(TopoAllocCoOp):
                     # for start node i
                     oflow = gp.quicksum(self.p[i, j, i, u] for u in self.procs if u != i)
                     iflow = gp.quicksum(self.p[i, j, u, i] for u in self.procs if u != i)
-                    self.model.addConstr(self.y[i, j] * (oflow - iflow) == self.y[i, j])
+                    self.model.addConstr((oflow - iflow) == self.y[i, j])
                     # self.model.addConstr(oflow - iflow == 1)
                     # for end node j
                     oflow = gp.quicksum(self.p[i, j, j, u] for u in self.procs if u != j)
                     iflow = gp.quicksum(self.p[i, j, u, j] for u in self.procs if u != j)
-                    self.model.addConstr(self.y[i, j] * (oflow - iflow) == -self.y[i, j])
+                    self.model.addConstr((oflow - iflow) == -self.y[i, j])
                     # self.model.addConstr(oflow - iflow == -1)
                     # for intermediate nodes
                     for u in self.procs:
@@ -66,9 +66,20 @@ class LinearFormu(TopoAllocCoOp):
                             oflow = gp.quicksum(self.p[i, j, u, v] for v in self.procs if v != u)
                             iflow = gp.quicksum(self.p[i, j, v, u] for v in self.procs if v != u)
                             # add the cubic term constraint
-                            self.model.addConstr(self.y[i, j] * (oflow - iflow) == 0)
+                            self.model.addConstr((oflow - iflow) == 0)
                             # self.model.addConstr(oflow - iflow == 0)
-
+                    
+        # cancel no demand path
+        for i in self.procs:
+            for j in self.procs:
+                if i < j:
+                    usage = 0
+                    for u in self.procs:
+                        for v in self.procs:
+                            if u < v:
+                                usage += self.p[i, j, u, v] + self.p[i, j, v, u]
+                    self.model.addConstr(usage <= self.y[i, j])
+                                
     def add_connectivity_constrs(self):
         self.w = {}
         total = 0
@@ -134,13 +145,13 @@ class LinearFormu(TopoAllocCoOp):
 
 if __name__ == "__main__":
     np.random.seed(0)
-    qubit_num = 16
-    max_demand_pair = int(qubit_num * (qubit_num-1) / 2)
-    moderate_demand_pair = qubit_num * 2
-    proc_num = 4
-    mem = 4
-    qig = RandomQIG(qubit_num, moderate_demand_pair, (1, 11))
-    # qig.contract(4, inplace=True)
+    qubit_num = 64
+    demand_pair = int(qubit_num * (qubit_num-1) / 2) # max
+    demand_pair = qubit_num * 2 # moderate
+    proc_num = 8
+    mem = 8
+    qig = RandomQIG(qubit_num, demand_pair, (1, 11))
+    qig.contract(4, inplace=True)
 
     mems = [mem] * proc_num
     W = proc_num * (proc_num-1) / 2
