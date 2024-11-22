@@ -35,8 +35,8 @@ class QIG:
     
     def contract(self, mem_limit: int, inplace: bool=False) -> nx.Graph:
             """
-            Group qubits in QIG to reduce total edge weight
-            Currently not very efficient on edge selection
+            Group qubits in QIG to reduce total edge weight. 
+            Currently not very efficient on edge selection. 
             """
             if inplace:
                 graph = self.graph

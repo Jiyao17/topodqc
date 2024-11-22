@@ -7,7 +7,10 @@ from .type import ProcMemNum, ClusterMem
 
 
 
-class TopoAllocCoOp:
+class TACO:
+    """
+    Topology-Allocation Co-Optimization
+    """
     def __init__(self, qig: QIG, mems: list[ProcMemNum], W: int) -> None:
         self.qig = qig
         self.mems = mems

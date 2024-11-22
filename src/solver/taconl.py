@@ -4,18 +4,17 @@
 import gurobipy as gp
 import numpy as np
 
-from .solver import TopoAllocCoOp
+from .taco import TACO
 from ..circuit.qig import QIG, RandomQIG
 from .type import ProcMemNum
 
 
-
-class LinearFormu(TopoAllocCoOp):
+class OrigFormu(TACO):
     def __init__(self, qig: QIG, mems: list[ProcMemNum], W: int) -> None:
         super().__init__(qig, mems, W)
 
-        # set NonConvex to 1
-        # self.model.setParam('NonConvex', 1)
+        # set NonConvex to 2 for non-convex quadratic constraints
+        # self.model.setParam('NonConvex', 2)
 
     def build(self):
         self.add_vars()
@@ -40,25 +39,26 @@ class LinearFormu(TopoAllocCoOp):
         for i in self.procs:
             for j in self.procs:
                 if i < j:
-                    y = 0
+                    y_expr = gp.QuadExpr(0)
                     for a in self.qubits:
                         for b in self.qubits:
                             if a < b and self.c[a, b] > 0:
-                                y += self.x[a, i] * self.x[b, j] + self.x[b, i] * self.x[a, j]
-
-                    self.y[i, j] = self.model.addVar(vtype=gp.GRB.BINARY, name=f'y_{i}_{j}')
-                    self.model.addConstr(self.y[i, j] <= y)
-                    # self.model.addConstr(y <= self.y[i, j] * len(self.qubits) / 2)
-                    self.model.addConstr(y <= self.y[i, j] * len(self.qubits))
+                                y_expr += self.x[a, i] * self.x[b, j] + self.x[a, j] * self.x[b, i]
+                    
                     # for start node i
+                    self.y[i, j] = self.model.addVar(vtype=gp.GRB.INTEGER, name=f'y_{i}_{j}')
+                    self.model.addConstr(self.y[i, j] == y_expr)
+
                     oflow = gp.quicksum(self.p[i, j, i, u] for u in self.procs if u != i)
                     iflow = gp.quicksum(self.p[i, j, u, i] for u in self.procs if u != i)
-                    self.model.addConstr((oflow - iflow) == self.y[i, j])
+                    self.model.addConstr(self.y[i, j] * (oflow - iflow) == self.y[i, j])
+                    # self.model.addGenConstrNL(self.y[i, j], self.y[i, j] * (oflow - iflow))
+                    # self.model.addGenConstrNL(y, y * (oflow - iflow))
                     # self.model.addConstr(oflow - iflow == 1)
                     # for end node j
                     oflow = gp.quicksum(self.p[i, j, j, u] for u in self.procs if u != j)
                     iflow = gp.quicksum(self.p[i, j, u, j] for u in self.procs if u != j)
-                    self.model.addConstr((oflow - iflow) == -self.y[i, j])
+                    self.model.addConstr(self.y[i, j] * (oflow - iflow) == -self.y[i, j])
                     # self.model.addConstr(oflow - iflow == -1)
                     # for intermediate nodes
                     for u in self.procs:
@@ -66,7 +66,7 @@ class LinearFormu(TopoAllocCoOp):
                             oflow = gp.quicksum(self.p[i, j, u, v] for v in self.procs if v != u)
                             iflow = gp.quicksum(self.p[i, j, v, u] for v in self.procs if v != u)
                             # add the cubic term constraint
-                            self.model.addConstr((oflow - iflow) == 0)
+                            self.model.addConstr(self.y[i, j] * (oflow - iflow) == 0)
                             # self.model.addConstr(oflow - iflow == 0)
                     
         # cancel no demand path
@@ -78,29 +78,27 @@ class LinearFormu(TopoAllocCoOp):
                         for v in self.procs:
                             if u < v:
                                 usage += self.p[i, j, u, v] + self.p[i, j, v, u]
-                    self.model.addConstr(usage <= self.y[i, j])
-                                
+                                # self.model.addConstr(self.p[i, j, u, v] <= self.y[i, j])
+                                # self.model.addConstr(self.p[i, j, v, u] <= self.y[i, j])
+                    self.model.addConstr(usage <= self.y[i, j] * (len(self.procs) - 1))
+
     def add_connectivity_constrs(self):
-        self.w = {}
         total = 0
         for u in self.procs:
             for v in self.procs:
                 if u < v:
-                    self.w[u, v] = self.model.addVar(vtype=gp.GRB.BINARY)
-                    w = 0
+                    # not_used = gp.NLExpr(1)
+                    not_used = 1
                     for i in self.procs:
                         for j in self.procs:
                             if i < j:
-                                w += self.p[i, j, u, v] + self.p[i, j, v, u]
-                                
-                    self.model.addConstr(self.w[u, v] <= w)
-                    self.model.addConstr(w <= self.w[u, v] * len(self.procs) * (len(self.procs) - 1))
-                    # self.model.addConstr(w <= self.w[u, v] * len(self.procs) * len(self.procs))
-                    total += self.w[u, v]
+                                not_used *= (1 - self.p[i, j, u, v]) * (1 - self.p[i, j, v, u])
+                    total += 1 - not_used
 
-        self.model.addConstr(total <= self.W)
+        # self.model.addConstr(total <= self.W)
+        ub = self.model.addVar(lb=0, ub=self.W, vtype=gp.GRB.INTEGER)
+        self.model.addGenConstrNL(ub, total)
              
-
     def set_obj(self):
         total = 0
         self.path_lens = {}
@@ -127,7 +125,6 @@ class LinearFormu(TopoAllocCoOp):
 
         self.model.setObjective(total, gp.GRB.MINIMIZE)
 
-
     def get_results(self):
         path_lengths = {}
         for i in self.procs:
@@ -143,6 +140,7 @@ class LinearFormu(TopoAllocCoOp):
         return path_lengths
 
 
+
 if __name__ == "__main__":
     np.random.seed(0)
     qubit_num = 64
@@ -151,13 +149,13 @@ if __name__ == "__main__":
     proc_num = 8
     mem = 8
     qig = RandomQIG(qubit_num, demand_pair, (1, 11))
-    qig.contract(4, inplace=True)
+    qig.contract(2, inplace=True)
 
     mems = [mem] * proc_num
     W = proc_num * (proc_num-1) / 2
     # W = (proc_num - 1) 
 
-    model = LinearFormu(qig, mems, W)
+    model = OrigFormu(qig, mems, W)
     model.build()
     print(model.solve())
 
