@@ -8,7 +8,49 @@ from .type import Qubits, Demand
 from ..utils.graph import contract_edge
 
 
+QASM_FILES = [
+    # "src/circuit/src/0410184_169.qasm",
+    "src/circuit/src/adr4_197.qasm",
+    "src/circuit/src/clip_206.qasm",
+    # "src/circuit/src/cm42a_207.qasm",
+    "src/circuit/src/co14_215.qasm",
+    # "src/circuit/src/dc2_222.qasm",
+    # "src/circuit/src/ham15_107.qasm",
+    # "src/circuit/src/misex1_241.qasm",
+]
+
+
 class QIG:
+    @staticmethod
+    def from_qasm(filename: str) -> 'QIG':
+        lines = open(filename, 'r').readlines()
+        qubits = []
+        demands = {}
+        # capture all lines fitting in the format of 'cx q[0],q[1];'
+        # and extract the qubits interaction
+        for line in lines:
+            if line.startswith('cx'):
+                line = line.replace('cx q[', '').replace('];\n', '')
+                line = line.replace('],q[', ' ')
+                src, dst = line.split(' ')
+                src, dst = int(src), int(dst)
+
+                if src not in qubits:
+                    qubits.append(src)
+                if dst not in qubits:
+                    qubits.append(dst)
+                if (src, dst) not in demands:
+                    demands[(src, dst)] = 1
+                else:
+                    demands[(src, dst)] += 1
+
+        qig = QIG()
+        qig.qubits = qubits
+        qig.demands = demands
+        qig.graph = qig.make_graph()
+
+        return qig
+
     def __init__(self, ) -> None:
         self.qubits: Qubits = []
         # demands: {(src, dst): demand}
@@ -99,12 +141,13 @@ class RandomQIG(QIG):
 
 
 if __name__ == '__main__':
-    qig = RandomQIG(64, 64*8, (1, 11))
+    # qig = RandomQIG(64, 64*8, (1, 11))
+    qig = QIG.from_qasm('src/circuit/src/0410184_169.qasm')
 
     print(len(qig.graph.edges))
     print(len(qig.graph.nodes))
 
-    qig.contract(8, inplace=True)
+    # qig.contract(8, inplace=True)
 
 
     print(qig.graph.nodes(data=True))

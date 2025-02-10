@@ -4,12 +4,12 @@
 import gurobipy as gp
 import numpy as np
 
-from .taco import TACO
+from .taco import TACOORIG
 from ..circuit.qig import QIG, RandomQIG
 from .type import ProcMemNum
 
 
-class OrigFormu(TACO):
+class OrigFormu(TACOORIG):
     def __init__(self, qig: QIG, mems: list[ProcMemNum], W: int) -> None:
         super().__init__(qig, mems, W)
 

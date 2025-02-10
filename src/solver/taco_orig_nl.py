@@ -9,10 +9,15 @@ from ..circuit.qig import QIG, RandomQIG
 from .type import ProcMemNum
 
 
-class OrigFormu(TACO):
-    def __init__(self, qig: QIG, mems: list[ProcMemNum], W: int) -> None:
-        super().__init__(qig, mems, W)
-
+class TACONL(TACO):
+    def __init__(self,
+            qig: QIG,
+            mems: list[ProcMemNum],
+            comms: list[ProcMemNum],
+            W: int,
+            timeout: int = 600
+            ) -> None:
+        super().__init__(qig, mems, comms, W, timeout)
         # set NonConvex to 2 for non-convex quadratic constraints
         # self.model.setParam('NonConvex', 2)
 
@@ -20,18 +25,8 @@ class OrigFormu(TACO):
         self.add_vars()
         self.add_alloc_constrs()
         self.add_path_constrs()
-        self.add_connectivity_constrs()
+        self.add_topology_constrs()
         self.set_obj()
-
-
-    def solve(self):
-        self.model.update()
-        self.model.optimize()
-        
-        if hasattr(self.model, 'objVal'):
-            return self.model.objVal
-        else:
-            return None
 
     def add_path_constrs(self):
         # each node is allocated to exactly one processor
@@ -48,24 +43,20 @@ class OrigFormu(TACO):
                     # for start node i
                     self.y[i, j] = self.model.addVar(vtype=gp.GRB.INTEGER, name=f'y_{i}_{j}')
                     self.model.addConstr(self.y[i, j] == y_expr)
-                    
+
                     oflow = gp.quicksum(self.p[i, j, i, u] for u in self.procs if u != i)
                     iflow = gp.quicksum(self.p[i, j, u, i] for u in self.procs if u != i)
                     self.model.addConstr(self.y[i, j] * (oflow - iflow) == self.y[i, j])
-                    # self.model.addConstr(oflow - iflow == 1)
                     # for end node j
                     oflow = gp.quicksum(self.p[i, j, j, u] for u in self.procs if u != j)
                     iflow = gp.quicksum(self.p[i, j, u, j] for u in self.procs if u != j)
                     self.model.addConstr(self.y[i, j] * (oflow - iflow) == -self.y[i, j])
-                    # self.model.addConstr(oflow - iflow == -1)
                     # for intermediate nodes
                     for u in self.procs:
                         if u != i and u != j:
                             oflow = gp.quicksum(self.p[i, j, u, v] for v in self.procs if v != u)
                             iflow = gp.quicksum(self.p[i, j, v, u] for v in self.procs if v != u)
-                            # add the cubic term constraint
-                            self.model.addConstr(self.y[i, j] * (oflow - iflow) == 0)
-                            # self.model.addConstr(oflow - iflow == 0)
+                            self.model.addConstr(oflow - iflow == 0)
                     
         # cancel no demand path
         for i in self.procs:
@@ -80,26 +71,40 @@ class OrigFormu(TACO):
                                 # self.model.addConstr(self.p[i, j, v, u] <= self.y[i, j])
                     self.model.addConstr(usage <= self.y[i, j] * (len(self.procs) - 1))
 
-    def add_connectivity_constrs(self):
+    def add_topology_constrs(self):
+        # total edge number in the topology
         total = 0
         for u in self.procs:
             for v in self.procs:
                 if u < v:
-                    prev = 1
+                    # not_used = gp.NLExpr(1)
+                    not_used = 1
                     for i in self.procs:
                         for j in self.procs:
                             if i < j:
-                                _w = self.model.addVar(vtype=gp.GRB.BINARY)
-                                self.model.addConstr(_w == (1 - self.p[i, j, u, v]) * (1 - self.p[i, j, v, u]))
-                                
-                                temp = self.model.addVar(vtype=gp.GRB.BINARY)
-                                self.model.addConstr(temp == prev * _w)
-                                
-                                prev = temp
+                                not_used *= (1 - self.p[i, j, u, v]) * (1 - self.p[i, j, v, u])
+                    total += 1 - not_used
 
-                    total += 1 - prev
+        # self.model.addConstr(total <= self.W)
+        res = self.model.addVar(lb=0, ub=self.W, vtype=gp.GRB.INTEGER)
+        self.model.addGenConstrNL(res, total)
 
-        self.model.addConstr(total <= self.W)
+        # max adjacent edge for each processor
+        for u in self.procs:
+            total = 0
+            for z in self.procs:
+                if u != z:
+                    adj = 1
+                    for i in self.procs:
+                        for j in self.procs:
+                            if i < j:
+                                adj *= (1 - self.p[i, j, u, z]) * (1 - self.p[i, j, z, u])
+                    total += 1 - adj
+
+            res = self.model.addVar(lb=0, ub=self.comms[u], vtype=gp.GRB.INTEGER)
+            self.model.addGenConstrNL(res, total)
+
+            
              
     def set_obj(self):
         total = 0
@@ -107,12 +112,12 @@ class OrigFormu(TACO):
         for i in self.procs:
             for j in self.procs:
                 if i < j:
-                    path_len = 0
+                    path_len = gp.LinExpr(0)
                     for u in self.procs:
                         for v in self.procs:
                             if u < v:
                                 path_len += self.p[i, j, u, v] + self.p[i, j, v, u]
-                    _demand = 0
+                    _demand = gp.QuadExpr(0)
                     for a in self.qubits:
                         for b in self.qubits:
                             if a < b and self.c[a, b] > 0:
@@ -127,37 +132,28 @@ class OrigFormu(TACO):
 
         self.model.setObjective(total, gp.GRB.MINIMIZE)
 
-    def get_results(self):
-        path_lengths = {}
-        for i in self.procs:
-            for j in self.procs:
-                if i < j:
-                    path_len = 0
-                    for u in self.procs:
-                        for v in self.procs:
-                            if u < v:
-                                path_len += self.p[i, j, u, v].x + self.p[i, j, v, u].x
-                    path_lengths[i, j] = path_len
 
-        return path_lengths
+
 
 
 
 if __name__ == "__main__":
     np.random.seed(0)
-    qubit_num = 64
-    demand_pair = int(qubit_num * (qubit_num-1) / 2) # max
+    qubit_num = 8
+    # demand_pair = int(qubit_num * (qubit_num-1) / 2) # max
     demand_pair = qubit_num * 2 # moderate
-    proc_num = 8
-    mem = 8
+    proc_num = 4
+    mem = 2
+    comm = 2
     qig = RandomQIG(qubit_num, demand_pair, (1, 11))
-    # qig.contract(4, inplace=True)
+    # qig.contract(2, inplace=True)
 
     mems = [mem] * proc_num
+    comms = [comm] * proc_num
     W = proc_num * (proc_num-1) / 2
     # W = (proc_num - 1) 
 
-    model = OrigFormu(qig, mems, W)
+    model = TACONL(qig, mems, comms, W)
     model.build()
     print(model.solve())
 
@@ -170,5 +166,5 @@ if __name__ == "__main__":
     #     for i in model.procs:
     #         print((a, i), model.x[a, i].x)
     
-    # path_lengths = model.get_results()
-    # print(path_lengths)
+    path_lengths = model.get_results()
+    print(path_lengths)

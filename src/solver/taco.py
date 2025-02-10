@@ -3,7 +3,7 @@ import gurobipy as gp
 
 from ..circuit.qig import QIG
 
-from .type import ProcMemNum, ClusterMem
+from .type import ProcMemNum, ClusterMem, ProcCommNum
 
 
 
@@ -11,10 +11,20 @@ class TACO:
     """
     Topology-Allocation Co-Optimization
     """
-    def __init__(self, qig: QIG, mems: list[ProcMemNum], W: int) -> None:
+    def __init__(self, 
+            qig: QIG, 
+            mems: list[ProcMemNum], 
+            comms: list[ProcCommNum],
+            W: int,
+            timeout: int = 600
+            ) -> None:
         self.qig = qig
+        # memory size of each processor
         self.mems = mems
+        # communication qubit number of each processor
+        self.comms = comms
         self.W = W
+        self.timeout = timeout
 
         self.qubits = { a: node for a, node in enumerate(qig.graph.nodes) }
         self.qubits_sizes = { a: len(qig.graph.nodes[node]['qubits']) 
@@ -30,13 +40,23 @@ class TACO:
                         self.c[a, b] = 0
 
         self.model = gp.Model()
-        
+        self.obj_vals = []
+
+        self.model.setParam('TimeLimit', self.timeout)
+
+
     def build(self):
         pass
 
-    def solve(self):
-        pass
-
+    def solve(self, callback=None):
+        self.model.update()
+        self.model.optimize(callback=callback)
+        
+        if hasattr(self.model, 'objVal'):
+            return self.model.objVal
+        else:
+            return None
+        
     def add_vars(self):
         # x[a][i] = 1 if node a is allocated to processor i
         self.x = {}
@@ -71,3 +91,36 @@ class TACO:
             
     def set_obj(self):
         pass
+
+    def get_topology(self):
+        if len(self.obj_vals) == 0:
+            return None
+        
+        edges = []
+        for u in self.procs:
+            for v in self.procs:
+                if u < v:
+                    for i in self.procs:
+                        for j in self.procs:
+                            if i < j:
+                                if self.p[i, j, u, v].x > 0.5 or self.p[i, j, v, u].x > 0.5:
+                                    edges.append((u, v))
+
+        return edges
+    
+    def get_objs(self):
+        if len(self.obj_vals) == 0:
+            return None
+        else:
+            return self.obj_vals
+
+
+    def callback(self, model: gp.Model, where=gp.GRB.Callback.MIPSOL):
+        """
+        callback function to record the objective values and time
+        """
+        if where == gp.GRB.Callback.MIPSOL:
+            time = model.cbGet(gp.GRB.Callback.RUNTIME)
+            obj = model.cbGet(gp.GRB.Callback.MIPSOL_OBJ)
+
+            self.obj_vals.append((time, obj))

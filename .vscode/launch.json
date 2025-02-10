@@ -8,7 +8,9 @@
             "name": "Python Debugger: Module",
             "type": "debugpy",
             "request": "launch",
-            "module": "src.solver.original"
+            // "module": "src.solver.original"
+            "module": "src.circuit.qig"
+
         }
     ]
 }
