@@ -4,14 +4,14 @@ import pickle
 import time
 
 from src.circuit import QIG, QASM_FILES, RandomQIG
-from src.solver import TACO, TACOORIG, TACONL, TACOL
+from src.solver import TACO, TACOORIG, TACONL, TACOL, callback
 
 
 def test_solver(SolverClass, qig: QIG, mems: list, comms: list, W: int, timeout: int=600):
     assert SolverClass in [TACOORIG, TACONL, TACOL]
     solver: TACO = SolverClass(qig, mems, comms, W, timeout)
     solver.build()
-    solver.solve(solver.callback)
+    solver.solve()
     
     objs = solver.get_objs()
     edges = solver.get_topology()

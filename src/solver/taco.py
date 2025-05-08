@@ -7,6 +7,17 @@ from .type import ProcMemNum, ClusterMem, ProcCommNum
 
 
 
+def callback(self, model: gp.Model, where=gp.GRB.Callback.MIPSOL):
+    """
+    callback function to record the objective values and time
+    """
+    if where == gp.GRB.Callback.MIPSOL:
+        time = model.cbGet(gp.GRB.Callback.RUNTIME)
+        obj = model.cbGet(gp.GRB.Callback.MIPSOL_OBJ)
+
+        self.obj_vals.append((time, obj))
+
+
 class TACO:
     """
     Topology-Allocation Co-Optimization
@@ -48,7 +59,7 @@ class TACO:
     def build(self):
         pass
 
-    def solve(self, callback=None):
+    def solve(self, callback=callback):
         self.model.update()
         self.model.optimize(callback=callback)
         
@@ -114,13 +125,3 @@ class TACO:
         else:
             return self.obj_vals
 
-
-    def callback(self, model: gp.Model, where=gp.GRB.Callback.MIPSOL):
-        """
-        callback function to record the objective values and time
-        """
-        if where == gp.GRB.Callback.MIPSOL:
-            time = model.cbGet(gp.GRB.Callback.RUNTIME)
-            obj = model.cbGet(gp.GRB.Callback.MIPSOL_OBJ)
-
-            self.obj_vals.append((time, obj))
