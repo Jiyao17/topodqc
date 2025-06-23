@@ -139,6 +139,8 @@ class TACOORIG(TACO):
 
         self.model.setObjective(total, gp.GRB.MINIMIZE)
 
+    def export(self, path: str):
+        self.model.write(path)
 
 
 
