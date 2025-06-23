@@ -26,6 +26,7 @@ import openjij as oj
 
 
 def load_config(config_file):
+    # os.system("pwd")
     with open(config_file, 'r') as file:
         config = json.load(file)
     return config
@@ -240,11 +241,14 @@ class HQCMCBD_algorithm:
         # Initialize positional arguments
         mode = kwargs.get('mode')    
         if mode == "manual":
-            config_file = 'config.json'
+            # config_file = 'config.json'
+            # os.system("pwd")
+            config_file = kwargs.get('config_file', 'config.json')
         elif mode == "default":
             config_file = 'config_default.json'  
         else:
-            print("Invalid Input")
+            # print("Invalid Input")
+            raise ValueError("Mode must be 'manual' or 'default'")
         config = load_config(config_file)
         lambda_config = config.get("lambda_var")
         submethod = config.get("submethod")

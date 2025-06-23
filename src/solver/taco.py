@@ -5,23 +5,28 @@ from ..circuit.qig import QIG
 
 from .type import ProcMemNum, ClusterMem, ProcCommNum
 
+class TACO:
+    pass
 
 
-def callback(self, model: gp.Model, where=gp.GRB.Callback.MIPSOL):
-    """
-    callback function to record the objective values and time
-    """
-    if where == gp.GRB.Callback.MIPSOL:
-        time = model.cbGet(gp.GRB.Callback.RUNTIME)
-        obj = model.cbGet(gp.GRB.Callback.MIPSOL_OBJ)
 
-        self.obj_vals.append((time, obj))
 
 
 class TACO:
     """
     Topology-Allocation Co-Optimization
     """
+    def callback(model: gp.Model, where=gp.GRB.Callback.MIPSOL):
+        """
+        callback function to record the objective values and time
+        """
+        if where == gp.GRB.Callback.MIPSOL:
+            time = model.cbGet(gp.GRB.Callback.RUNTIME)
+            obj = model.cbGet(gp.GRB.Callback.MIPSOL_OBJ)
+
+            with open('obj_vals.txt', 'w') as f:
+                f.write(f'{time}, {obj}\n')
+
     def __init__(self, 
             qig: QIG, 
             mems: list[ProcMemNum], 
