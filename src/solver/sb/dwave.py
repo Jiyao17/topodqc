@@ -77,16 +77,23 @@ def QDict2Matrix(Q_dict: dict) -> torch.Tensor:
 
 Q = QDict2Matrix(Q)
 print("Q matrix:\n", Q)
-print("Q size:", Q.size())
-sb.minimize(matrix=Q, constant=offset)
+# print("Q size:", Q.size())
+vec, val = sb.minimize(matrix=Q, constant=offset, best_only=True, domain='binary',)
+# show the result
+print("Best value:", val)
+print("Best vector:", vec)
+
 
 # # solve the BQM using simulated annealing
-# from dimod import SimulatedAnnealingSampler
-# sampler = SimulatedAnnealingSampler()
-# sampleset = sampler.sample(bqm, num_reads=10, label='simulated annealing')
+from dimod import SimulatedAnnealingSampler
+sampler = SimulatedAnnealingSampler()
+sampleset = sampler.sample(bqm, num_reads=10)
 
 # # Print the results
 # print(sampleset)
 # # Print the best sample
-# best_sample = sampleset.first.sample
-# print("Best sample:", best_sample)
+best_sample = sampleset.first.sample
+print("Best sample:", best_sample)
+
+print("Objective value:", sampleset.first.energy)
+# print("Objective value:", bqm.energy(best_sample))

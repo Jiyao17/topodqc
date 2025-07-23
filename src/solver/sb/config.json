@@ -6,7 +6,7 @@
     },
     "submethod": "normal",
     "debug_mode": false,
-    "Hybrid_mode": false,
+    "Hybrid_mode": true,
     "dwave": {
         "mode": "bifurcation",
         "DWave_token": "example-token",

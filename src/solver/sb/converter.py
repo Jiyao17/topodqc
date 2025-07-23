@@ -235,7 +235,7 @@ def QUBO_Cons_selection(QUBO_pre, lhs, symbol, rhs, round_num = None, penalty = 
 Part HQCMCBD_algorithm (HQC-Bend)
 """
 
-class HQCMCBD_algorithm:
+class Model2QUBO:
     
     def __init__(self, m, *args, **kwargs):
         # Initialize positional arguments
@@ -452,15 +452,15 @@ class HQCMCBD_algorithm:
         # Set the MAP Constr
         self.MAP.addMConstr(self.A_map, self.bin_x, self.map_relation, self.rhs_map, name=f'MAP_init_constraints')
 
-    def build_QUBO_master_problem(self):
+    def build_QUBO_master_problem(self, penalty=10):
         num_map_constrs =  len(self.map_relation)
         Qubo_obj = np.concatenate((self.obj_c, self.lambda_coeff))
         self.bifurcation_QUBO = np.diag(Qubo_obj)
         self.qubo_slack_dict = {}
         for const_ in range(num_map_constrs):
             lhs = np.concatenate((self.A_map[const_] , np.zeros_like(self.lambda_coeff)))
-            self.bifurcation_QUBO, self.qubo_slack_dict  = QUBO_Cons_selection(self.bifurcation_QUBO, lhs, self.map_relation[const_],\
-                                                                                self.rhs_map[const_], round_num= 0, penalty=10, \
+            self.bifurcation_QUBO, self.qubo_slack_dict  = QUBO_Cons_selection(self.bifurcation_QUBO, lhs, self.map_relation[const_],
+                                                                                self.rhs_map[const_], round_num= 0, penalty=penalty,
                                                                                     dictionary = self.qubo_slack_dict)
 
     def solve_master_problem(self, count=0):
@@ -606,8 +606,8 @@ class HQCMCBD_algorithm:
             if i >= self.mcut_num:
                 break
         self.lambda_lower = max(lambda_lower_list)
-    
-    def bifurcation_solve_for_value(self, count=0, penalty = 10):
+
+    def bifurcation_solve_for_value(self, count=0, max_steps=1e5, penalty=10):
         with open(f'LP_output_dwave\LP_output_MAP_{count}.lp', 'w') as f:
             dimod.lp.dump(self.cqm, f)
         bqm, inverter = cqm_to_bqm(self.cqm, penalty)
@@ -625,7 +625,7 @@ class HQCMCBD_algorithm:
         Q_tensor = torch.from_numpy(self.bifurcation_QUBO)
 
         st = time.time()
-        best_vector, _ = sb.minimize(Q_tensor, max_steps=1e5 , agents = 2048, input_type="binary",device="cuda")
+        best_vector, best_val = sb.minimize(Q_tensor, max_steps=max_steps, agents=2048, input_type="binary", device="cuda")
         et = time.time()
         exe_time = (et - st) * 1000
         
@@ -645,22 +645,14 @@ class HQCMCBD_algorithm:
 
         self.obj_value = sum(best_bin_vector[i] * self.obj_c[i] for i in range(self.num_binvars)) + self.lambda_lower
                         
-        Bifurcation_data = {}
-        time_data = {
-            "time_start": st,
-            "time_end": et,
-            "time_exec": exe_time
-        }
-        Bifurcation_data["time_data"] = time_data
-        dest_path = os.path.join(os.getcwd(), "data_output", f"Bifurcation_info-round-{count}.json")
-        create_config_file(dest_path, Bifurcation_data, count)
+        return best_vector, best_val, self.obj_value
             
-    def bifurcation_solve_for_value_classic(self, count=0, penalty = 10):
+    def bifurcation_solve_for_value_classic(self, count=0, max_steps=1e5,):
         #np.save(f"LP_output_dwave\bifurcation_round_{count}.npy", self.bifurcation_QUBO) # maybe for future use
         Q_tensor = torch.from_numpy(self.bifurcation_QUBO)
 
         st = time.time()
-        best_vector, best_val = sb.minimize(Q_tensor, max_steps=5e5 , agents = 128, input_type="binary",device="cuda")
+        best_vector, best_val = sb.minimize(Q_tensor, max_steps=max_steps, agents = 128, input_type="binary",device="cuda")
         et = time.time()
         exe_time = (et - st) * 1000
 
@@ -677,15 +669,8 @@ class HQCMCBD_algorithm:
         self.lambda_lower = np.sum([self.lambda_coeff[i] * lambda_values[i] for i in range(self.lambda_bits)])
         self.obj_value = sum(best_bin_vector[i] * self.obj_c[i] for i in range(self.num_binvars)) + self.lambda_lower
         
-        Bifurcation_data = {}    
-        time_data = {
-            "time_start": st,
-            "time_end": et,
-            "time_exec": exe_time
-        }
-        Bifurcation_data["time_data"] = time_data
-        dest_path = os.path.join(os.getcwd(), "data_output", f"Bifurcation_info-round-{count}.json")
-        create_config_file(dest_path, Bifurcation_data, count)
+        return best_vector, best_val, self.obj_value
+
 
     def openjij_solve_for_value(self, count=0, penalty = 10):
         #np.save(f"LP_output_dwave\Openjij_round_{count}.npy", self.bifurcation_QUBO) # maybe for future use
@@ -1071,7 +1056,7 @@ class HQCMCBD_algorithm:
             self.master_constraint_dict.update({f"c-round-{counter}":  [[self.MAP_next_lhs[m] for m in range(len(self.MAP_next_lhs))] \
                 + [self.lambda_coeff[n] for n in range(self.lambda_bits)] , equality, self.MAP_next_rhs] })
                 
-    def run(self):
+    def run(self, penalty=10, max_steps=1e5):
         lambda_upper_list = []
         lambda_lower_list = []
         obj_value_list = []
@@ -1084,151 +1069,13 @@ class HQCMCBD_algorithm:
         elif self.threshold_type == "absolute":
             gap = abs_gap
         
-        if self.Hybrid_mode:       
-            if self.dwave_solver in ["bifurcation", "openjij"]:
-                self.build_QUBO_master_problem()
-                while gap >= self.threshold_gap:
-                    print(f"Benders decomposition Round - {cunt}")
-                    self.solve_master_problem(cunt)
-                    self.build_gurobi_sub_problem(cunt)
-                    ratio = np.round(abs(self.lambda_upper - self.lambda_lower) / abs(self.lambda_upper) *100 , 3)
-                    if self.Msense:
-                        print(f"Round {cunt}: \n \
-                            Current Objective value is {-1* self.obj_value}; \n \
-                            lambda_upper is {-1*self.lambda_lower}; \n \
-                            lambda_lower is {-1*self.lambda_upper}; \n \
-                            Relative gap is {ratio}%. \n \
-                            Absolute gap is {abs(self.lambda_upper - self.lambda_lower)}")
-                        obj_value_list.append(-1* self.obj_value)
-                        lambda_upper_list.append(-1*self.lambda_lower)
-                        lambda_lower_list.append(-1*self.lambda_upper)                
-                    else:
-                        print(f"Round {cunt}: \n \
-                            Current Objective value is {self.obj_value}; \n \
-                            lambda_upper is {self.lambda_upper}; \n \
-                            lambda_lower is {self.lambda_lower}; \n \
-                            Relative gap is {ratio}%. \n \
-                            Absolute gap is {abs(self.lambda_upper - self.lambda_lower)}")
-                        obj_value_list.append(self.obj_value)
-                        lambda_upper_list.append(self.lambda_upper)
-                        lambda_lower_list.append(self.lambda_lower)
-                    
-                    ralative_gap = np.round(abs(self.lambda_upper - self.lambda_lower) / abs(self.lambda_upper) *100 , 3)
-                    abs_gap = abs(self.lambda_upper - self.lambda_lower)
-                    if self.threshold_type == "relative":
-                        gap = ralative_gap
-                    elif self.threshold_type == "absolute":
-                        gap = abs_gap
-                    if gap < self.threshold_gap:
-                        print("optimal found, it takes", cunt, " Rounds.")
-                        break                    
-                    cunt += 1
-                    if  cunt > self.max_steps:
-                        print("Max iteration reached, it takes", cunt, " Rounds.")
-                        break
-            else:
-                self.build_cqm_master_problem()
-                while gap >= self.threshold_gap:
-                    print(f"Benders decomposition Round - {cunt}")
-                    self.solve_master_problem(cunt)
-                    self.build_gurobi_sub_problem(cunt)
-                    ratio = np.round(abs(self.lambda_upper - self.lambda_lower) / abs(self.lambda_upper) *100 , 3) 
-                    if self.Msense:
-                        print(f"Round {cunt}: \n \
-                            Current Objective value is {-1* self.obj_value}; \n \
-                            lambda_upper is {-1*self.lambda_lower}; \n \
-                            lambda_lower is {-1*self.lambda_upper}; \n \
-                            Relative gap is {ratio}%. \n \
-                            Absolute gap is {abs(self.lambda_upper - self.lambda_lower)}")
-                        obj_value_list.append(-1* self.obj_value)
-                        lambda_upper_list.append(-1*self.lambda_lower)
-                        lambda_lower_list.append(-1*self.lambda_upper)                
-                    else:
-                        print(f"Round {cunt}: \n \
-                            Current Objective value is {self.obj_value}; \n \
-                            lambda_upper is {self.lambda_upper}; \n \
-                            lambda_lower is {self.lambda_lower}; \n \
-                            Relative gap is {ratio}%. \n \
-                            Absolute gap is {abs(self.lambda_upper - self.lambda_lower)}")
-                        obj_value_list.append(self.obj_value)
-                        lambda_upper_list.append(self.lambda_upper)
-                        lambda_lower_list.append(self.lambda_lower)
-                
-                    ralative_gap = np.round(abs(self.lambda_upper - self.lambda_lower) / abs(self.lambda_upper) *100 , 3)
-                    abs_gap = abs(self.lambda_upper - self.lambda_lower)
-                    
-                    if self.threshold_type == "relative":
-                        gap = ralative_gap
-                    elif self.threshold_type == "absolute":
-                        gap = abs_gap
-                    
-                    if gap < self.threshold_gap:
-                        print("optimal found, it takes", cunt, " Rounds.")
-                        break
-                    cunt += 1
-                    if  cunt > self.max_steps:
-                        print("Max iteration reached, it takes", cunt, " Rounds.")
-                        break
-            
-        else:
-            self.build_gurobi_master_problem()
-            while gap >= self.threshold_gap:
-                
-                print(f"Benders decomposition Round - {cunt}")
-                
-                self.solve_gurobi_master_problem(cunt)
-                self.build_gurobi_sub_problem(cunt)
-                
-                ratio = np.round(abs(self.lambda_upper - self.lambda_lower) / abs(self.lambda_upper) *100 , 3)
-                
-                if self.Msense:
-                    print(f"Round {cunt}: \n \
-                        Current Objective value is {-1* self.obj_value}; \n \
-                        lambda_upper is {-1*self.lambda_lower}; \n \
-                        lambda_lower is {-1*self.lambda_upper}; \n \
-                        Relative gap is {ratio}%. \n \
-                        Absolute gap is {abs(self.lambda_upper - self.lambda_lower)}")
-                    obj_value_list.append(-1* self.obj_value)
-                    lambda_upper_list.append(-1*self.lambda_lower)
-                    lambda_lower_list.append(-1*self.lambda_upper)                
-                else:
-                    print(f"Round {cunt}: \n \
-                        Current Objective value is {self.obj_value}; \n \
-                        lambda_upper is {self.lambda_upper}; \n \
-                        lambda_lower is {self.lambda_lower}; \n \
-                        Relative gap is {ratio}%. \n \
-                        Absolute gap is {abs(self.lambda_upper - self.lambda_lower)}")
-                    obj_value_list.append(self.obj_value)
-                    lambda_upper_list.append(self.lambda_upper)
-                    lambda_lower_list.append(self.lambda_lower)
-                
-                ralative_gap = np.round(abs(self.lambda_upper - self.lambda_lower) / abs(self.lambda_upper) *100 , 3)
-                abs_gap = abs(self.lambda_upper - self.lambda_lower)
-                
-                if self.threshold_type == "relative":
-                    gap = ralative_gap
-                elif self.threshold_type == "absolute":
-                    gap = abs_gap
-                if gap < self.threshold_gap:
-                    print("optimal found, it takes", cunt, f" Rounds. The Binary results are stored at {self.data_folder}")
-                    break
-                cunt += 1
-                if  cunt > self.max_steps:
-                    print("Max iteration reached, it takes", cunt, " Rounds.")
-                    break
-
-        lambda_upper_filepath = os.path.join(self.data_folder, "lambda_upper_list.json")
-        lambda_lower_filepath = os.path.join(self.data_folder, "lambda_lower_list.json")
-        obj_value_filepath = os.path.join(self.data_folder, "obj_value_list.json")
-            
-        with open(lambda_upper_filepath, 'w') as json_file:
-            json.dump(lambda_upper_list, json_file)    
-        with open(lambda_lower_filepath, 'w') as json_file:
-            json.dump(lambda_lower_list, json_file)
-        with open(obj_value_filepath, 'w') as json_file:
-            json.dump(obj_value_list, json_file)
-
-        print(f"lambda_upper list has been saved to {lambda_upper_filepath}")
-        print(f"lambda_lower list has been saved to {lambda_lower_filepath}")
-        print(f"obj_value list has been saved to {obj_value_filepath}")
+        assert self.Hybrid_mode, "must use hybrid"
+        assert self.dwave_solver in ["bifurcation", "openjij"], "must use bifurcation or openjij"
         
+        self.build_QUBO_master_problem(penalty=penalty)
+        vec, val, obj = self.bifurcation_solve_for_value_classic(max_steps=max_steps)
+
+        # self.build_cqm_master_problem()
+        # vec, val, obj = self.bifurcation_solve_for_value(max_steps=max_steps)
+        
+        return vec, val, obj

@@ -6,6 +6,7 @@ from src.circuit.qig import QIG, RandomQIG
 
 from src.solver.taco_l import TACOL
 from src.solver.HQCMCBD import HQCMCBD_algorithm
+from src.solver.sb.converter import Model2QUBO
 
 
 
@@ -18,18 +19,24 @@ class TACOL_SB(TACOL):
         super().__init__(qig, mems, comms, W, timeout)
         # self.name = "TACOL_SB"
 
-    def solve(self, config_file):
+    def solve_sb(self, config_file, max_steps=1e4):
         self.model.update()
         
+        # show variable number
+        print("Variable number:", self.model.num_vars)
 
-        solver = HQCMCBD_algorithm(self.model, mode = "manual", config_file=config_file)
-        solver.run()
+        solver = Model2QUBO(self.model, mode = "manual", config_file=config_file)
+        vec, val, obj = solver.run(max_steps=max_steps)
+
+        print("SB solution vector:", len(vec))
+        print("SB solution value:", val)
+        print("SB objective value:", obj)
 
 
 if __name__ == "__main__":
 
     PROJ_DIR = '/home/ljy/projects/topodqc/'
-    config_file = 'src/solver/HQCMCBD/config.json'
+    config_file = 'src/solver/sb/config.json'
     config_file = PROJ_DIR + config_file
 
     # set torch default tensor type to double
@@ -60,4 +67,7 @@ if __name__ == "__main__":
 
     model = TACOL_SB(qig, mems, comms, W)
     model.build()
-    print(model.solve(config_file))
+
+    # model.solve()
+
+    model.solve_sb(config_file, max_steps=1e4)
