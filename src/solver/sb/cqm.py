@@ -15,6 +15,8 @@ from dwave.system import LeapHybridCQMSampler
 from dwave.system import LeapHybridSampler
 from dwave.system import DWaveSampler
 from dwave.system import EmbeddingComposite
+from dwave.samplers import SimulatedAnnealingSampler
+
 import time
 import json
 
@@ -1101,3 +1103,27 @@ class CQMConverter:
         return self.cqm
             
 
+
+if __name__ == "__main__":
+    model = gp.Model("cqm")
+    x1 = model.addVar(vtype=GRB.BINARY, name="x1")
+    x2 = model.addVar(vtype=GRB.BINARY, name="x2")
+    x3 = model.addVar(vtype=GRB.BINARY, name="x3")
+    x4 = model.addVar(vtype=GRB.BINARY, name="x4")
+
+    model.addConstr(x1 * x2 <= x3)
+    model.addConstr(x2 * x3 <= x4)
+
+    expr = x1 * x3
+    model.setObjective(expr * x4, sense=GRB.MINIMIZE)
+
+    cqm = CQMConverter(model).run()
+    bqm = dimod.cqm_to_bqm(cqm)
+    # solve this cqm with simulated annealing
+    sampler = SimulatedAnnealingSampler()
+    samples = sampler.sample(bqm, num_reads=10)
+
+    best_sample = samples.first.sample
+    print("Best sample:", best_sample)
+
+    print("Objective value:", samples.first.energy)
