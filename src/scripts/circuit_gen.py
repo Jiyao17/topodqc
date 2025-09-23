@@ -104,11 +104,13 @@ def qaoa_gen(num_qubits: int, folder: str):
     # set random weights to edges
     for u, v in graph.edges():
         graph[u][v]['weight'] = np.random.randint(1, 10)
-
+    print("graph generated")
     maxcut = Maxcut(graph)
+    print("maxcut instance created")
     op = maxcut.to_quadratic_program()
     qubo = QuadraticProgramToQubo().convert(op)
     cost_op, _ = qubo.to_ising()
+    print("cost operator generated")
     qaoa_circuit = QAOAAnsatz(cost_operator=cost_op)
 
     # bound parameters so it can be transpiled to .qasm
@@ -129,4 +131,4 @@ if __name__ == "__main__":
     circuit_folder = 'src/circuit/src/'
     # qft_gen(512, circuit_folder)
     # grover_gen(512, circuit_folder)
-    qaoa_gen(32, circuit_folder)
+    qaoa_gen(512, circuit_folder)
