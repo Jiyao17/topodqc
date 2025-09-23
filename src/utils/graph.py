@@ -3,6 +3,8 @@ from typing import NewType
 import copy
 
 import networkx as nx
+import matplotlib.pyplot as plt
+
 
 # nodes are named by strings in networkx library
 Node = NewType('Node', str)
@@ -87,6 +89,25 @@ def contract_edge(graph: nx.Graph, edge: tuple[Node, Node], inplace: bool=False)
 
     return graph
 
+def draw(graph: nx.Graph, edge_labels: dict=None, node_labels: dict=None, filename: str=None):
+    """
+    Draw the graph using matplotlib
+    """
+    layout = nx.spring_layout(graph)
+    nx.draw(graph, pos=layout, with_labels=False, node_size=500, node_color='lightblue', font_size=8)
+
+    
+    if edge_labels:
+        nx.draw_networkx_edge_labels(graph, pos=layout, edge_labels=edge_labels)
+    if node_labels:
+        nx.draw_networkx_labels(graph, pos=layout, labels=node_labels, font_size=8, font_color='red')
+    
+    if filename:
+        plt.savefig(filename)
+    else:
+        plt.show()
+
+    plt.close()
 
 if __name__ == "__main__":
     nodes = [1, 2, 3, 4]

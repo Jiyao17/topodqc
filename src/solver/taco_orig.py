@@ -31,12 +31,12 @@ class TACOORIG(TACO):
     def add_path_constrs(self):
         # each node is allocated to exactly one processor
         self.y = {}
-        for i in self.procs:
-            for j in self.procs:
+        for i in self.qpus:
+            for j in self.qpus:
                 if i < j:
                     y_expr = gp.QuadExpr(0)
-                    for a in self.qubits:
-                        for b in self.qubits:
+                    for a in self.squbits:
+                        for b in self.squbits:
                             if a < b and self.c[a, b] > 0:
                                 y_expr += self.x[a, i] * self.x[b, j] + self.x[a, j] * self.x[b, i]
                     
@@ -44,42 +44,42 @@ class TACOORIG(TACO):
                     self.y[i, j] = self.model.addVar(vtype=gp.GRB.INTEGER, name=f'y_{i}_{j}')
                     self.model.addConstr(self.y[i, j] == y_expr)
                     
-                    oflow = gp.quicksum(self.p[i, j, i, u] for u in self.procs if u != i)
-                    iflow = gp.quicksum(self.p[i, j, u, i] for u in self.procs if u != i)
+                    oflow = gp.quicksum(self.p[i, j, i, u] for u in self.qpus if u != i)
+                    iflow = gp.quicksum(self.p[i, j, u, i] for u in self.qpus if u != i)
                     self.model.addConstr(self.y[i, j] * (oflow - iflow) == self.y[i, j])
                     # for end node j
-                    oflow = gp.quicksum(self.p[i, j, j, u] for u in self.procs if u != j)
-                    iflow = gp.quicksum(self.p[i, j, u, j] for u in self.procs if u != j)
+                    oflow = gp.quicksum(self.p[i, j, j, u] for u in self.qpus if u != j)
+                    iflow = gp.quicksum(self.p[i, j, u, j] for u in self.qpus if u != j)
                     self.model.addConstr(self.y[i, j] * (oflow - iflow) == -self.y[i, j])
                     # for intermediate nodes
-                    for u in self.procs:
+                    for u in self.qpus:
                         if u != i and u != j:
-                            oflow = gp.quicksum(self.p[i, j, u, v] for v in self.procs if v != u)
-                            iflow = gp.quicksum(self.p[i, j, v, u] for v in self.procs if v != u)
+                            oflow = gp.quicksum(self.p[i, j, u, v] for v in self.qpus if v != u)
+                            iflow = gp.quicksum(self.p[i, j, v, u] for v in self.qpus if v != u)
                             self.model.addConstr(oflow - iflow == 0)
                     
         # cancel no demand path
-        for i in self.procs:
-            for j in self.procs:
+        for i in self.qpus:
+            for j in self.qpus:
                 if i < j:
                     usage = 0
-                    for u in self.procs:
-                        for v in self.procs:
+                    for u in self.qpus:
+                        for v in self.qpus:
                             if u < v:
                                 usage += self.p[i, j, u, v] + self.p[i, j, v, u]
                                 # self.model.addConstr(self.p[i, j, u, v] <= self.y[i, j])
                                 # self.model.addConstr(self.p[i, j, v, u] <= self.y[i, j])
-                    self.model.addConstr(usage <= self.y[i, j] * (len(self.procs) - 1))
+                    self.model.addConstr(usage <= self.y[i, j] * (len(self.qpus) - 1))
 
     def add_topology_constrs(self):
         # total edge number in the topology
         total = 0
-        for u in self.procs:
-            for v in self.procs:
+        for u in self.qpus:
+            for v in self.qpus:
                 if u < v:
                     prev = 1
-                    for i in self.procs:
-                        for j in self.procs:
+                    for i in self.qpus:
+                        for j in self.qpus:
                             if i < j:
                                 _w = self.model.addVar(vtype=gp.GRB.BINARY)
                                 self.model.addConstr(_w == (1 - self.p[i, j, u, v]) * (1 - self.p[i, j, v, u]))
@@ -94,13 +94,13 @@ class TACOORIG(TACO):
         self.model.addConstr(total <= self.W)
 
         # max adjacent edge for each processor
-        for u in self.procs:
+        for u in self.qpus:
             adj = 0
-            for z in self.procs:
+            for z in self.qpus:
                 if u != z:
                     unused = 1
-                    for i in self.procs:
-                        for j in self.procs:
+                    for i in self.qpus:
+                        for j in self.qpus:
                             if i < j:
                                 _e = self.model.addVar(vtype=gp.GRB.BINARY)
                                 self.model.addConstr(_e == (1 - self.p[i, j, u, z]) * (1 - self.p[i, j, z, u]))
@@ -116,17 +116,17 @@ class TACOORIG(TACO):
     def set_obj(self):
         total = 0
         self.path_lens = {}
-        for i in self.procs:
-            for j in self.procs:
+        for i in self.qpus:
+            for j in self.qpus:
                 if i < j:
                     path_len = 0
-                    for u in self.procs:
-                        for v in self.procs:
+                    for u in self.qpus:
+                        for v in self.qpus:
                             if u < v:
                                 path_len += self.p[i, j, u, v] + self.p[i, j, v, u]
                     _demand = 0
-                    for a in self.qubits:
-                        for b in self.qubits:
+                    for a in self.squbits:
+                        for b in self.squbits:
                             if a < b and self.c[a, b] > 0:
                                 _demand += self.c[a, b] * self.x[a, i] * self.x[b, j] \
                                             + self.c[a, b] * self.x[b, i] * self.x[a, j]
@@ -147,15 +147,15 @@ class TACOORIG(TACO):
 
 if __name__ == "__main__":
     np.random.seed(0)
-    proc_num = 4
+    proc_num = 2
     mem = 4
     comm = 4
 
-    # qubit_num = 8
-    # demand_pair = int(qubit_num * (qubit_num-1) / 2) # max
+    qubit_num = 8
+    demand_pair = int(qubit_num * (qubit_num-1) / 2) # max
     # demand_pair = qubit_num * 2 # moderate
-    qig = QIG.from_qasm('src/circuit/src/0410184_169.qasm')
-    # qig = RandomQIG(qubit_num, demand_pair, (1, 11))
+    # qig = QIG.from_qasm('src/circuit/src/0410184_169.qasm')
+    qig = RandomQIG(qubit_num, demand_pair, (1, 11))
     # qig.contract(4, inplace=True)
 
     mems = [mem] * proc_num
@@ -176,7 +176,7 @@ if __name__ == "__main__":
     #     for i in model.procs:
     #         print((a, i), model.x[a, i].x)
     
-    path_lengths = model.get_results()
-    print(path_lengths)
+    # path_lengths = model.get_results()
+    # print(path_lengths)
     # {(0, 1): 1.0, (0, 2): 1.0, (0, 3): 1.0, (1, 2): 1.0, (1, 3): 1.0, (2, 3): 0.0}
     # {(0, 1): 0.0, (0, 2): 1.0, (0, 3): 1.0, (1, 2): 1.0, (1, 3): 1.0, (2, 3): 2.0}

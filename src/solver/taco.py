@@ -42,16 +42,18 @@ class TACO:
         self.W = W
         self.timeout = timeout
 
-        self.qubits = { a: node for a, node in enumerate(qig.graph.nodes) }
-        self.qubits_sizes = { a: len(qig.graph.nodes[node]['qubits']) 
+        self.squbits = { a: node for a, node in enumerate(qig.graph.nodes) }
+        self.squbits_rev = { node: a for a, node in enumerate(qig.graph.nodes) }
+        self.squbits_sizes = { a: len(qig.graph.nodes[node]['qubits']) 
                                 for a, node in enumerate(qig.graph.nodes) }
-        self.procs = { i: mem for i, mem in enumerate(mems) }
+        self.qpus = { i: mem for i, mem in enumerate(mems) }
+        self.qpus_rev = { mem: i for i, mem in enumerate(mems) }
         self.c = {}
-        for a in self.qubits:
-            for b in self.qubits:
+        for a in self.squbits:
+            for b in self.squbits:
                 if a < b:
-                    if qig.graph.has_edge(self.qubits[a], self.qubits[b]):
-                        self.c[a, b] = qig.graph[self.qubits[a]][self.qubits[b]]['demand']
+                    if qig.graph.has_edge(self.squbits[a], self.squbits[b]):
+                        self.c[a, b] = qig.graph[self.squbits[a]][self.squbits[b]]['demand']
                     else:
                         self.c[a, b] = 0
 
@@ -76,17 +78,17 @@ class TACO:
     def add_vars(self):
         # x[a][i] = 1 if node a is allocated to processor i
         self.x = {}
-        for a in self.qubits:
-            for i in self.procs:
+        for a in self.squbits:
+            for i in self.qpus:
                 self.x[a, i] = self.model.addVar(vtype=gp.GRB.BINARY, name=f'x_{a}_{i}')
 
         # p[i][j][u][v] = 1 if the path from node i to j goes through edge (u, v)
         self.p = {}
-        for i in self.procs:
-            for j in self.procs:
+        for i in self.qpus:
+            for j in self.qpus:
                 if i < j:
-                    for u in self.procs:
-                        for v in self.procs:
+                    for u in self.qpus:
+                        for v in self.qpus:
                             if u != v:
                                 self.p[i, j, u, v] = self.model.addVar(vtype=gp.GRB.BINARY, name=f'p_{i}_{j}_{u}_{v}')
 
@@ -95,15 +97,15 @@ class TACO:
 
     def add_alloc_constrs(self):
         # each node is allocated to exactly one processor
-        for a in self.qubits:
-            self.model.addConstr(gp.quicksum(self.x[a, i] for i in self.procs) == 1)
+        for a in self.squbits:
+            self.model.addConstr(gp.quicksum(self.x[a, i] for i in self.qpus) == 1)
 
         # processor capacity constraint
-        for i in self.procs:
+        for i in self.qpus:
             self.model.addConstr(
                 # gp.quicksum(self.x[a, i] for a in self.qubits) 
-                gp.quicksum(self.qubits_sizes[a] * self.x[a, i] for a in self.qubits) 
-                    <= self.procs[i])
+                gp.quicksum(self.squbits_sizes[a] * self.x[a, i] for a in self.squbits) 
+                    <= self.qpus[i])
             
     def set_obj(self):
         pass
@@ -113,11 +115,11 @@ class TACO:
             return None
         
         edges = []
-        for u in self.procs:
-            for v in self.procs:
+        for u in self.qpus:
+            for v in self.qpus:
                 if u < v:
-                    for i in self.procs:
-                        for j in self.procs:
+                    for i in self.qpus:
+                        for j in self.qpus:
                             if i < j:
                                 if self.p[i, j, u, v].x > 0.5 or self.p[i, j, v, u].x > 0.5:
                                     edges.append((u, v))

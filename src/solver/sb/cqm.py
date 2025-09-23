@@ -235,9 +235,9 @@ def QUBO_Cons_selection(QUBO_pre, lhs, symbol, rhs, round_num = None, penalty = 
 Part HQCMCBD_algorithm (HQC-Bend)
 """
 
-class Model2QUBO:
-    
-    def __init__(self, m: gp.Model, *args, **kwargs):
+class CQMConverter:
+
+    def __init__(self, m, *args, **kwargs):
         # Initialize positional arguments
         mode = kwargs.get('mode')    
         if mode == "manual":
@@ -289,7 +289,7 @@ class Model2QUBO:
         os.makedirs(self.LP_folder, exist_ok=True)
         self.preprocessing(m)
 
-    def preprocessing(self, m: gp.Model):
+    def preprocessing(self, m):
         self.lambda_bits = self.lambda_nneg_bit + self.lambda_dec_bit + self.lambda_neg_bit
         self.lambda_coeff = np.append(-2**np.arange(1, self.lambda_neg_bit + 1, dtype=float), 2**np.arange(-self.lambda_dec_bit, self.lambda_nneg_bit, dtype=float))
         self.master_constraint_dict = {}
@@ -424,7 +424,13 @@ class Model2QUBO:
                 self.bin_var_count[name] = index + 1
 
     def build_cqm_master_problem(self):
-        self.bin_x_cqm = [dimod.Binary(f'bin_{i}') for i in range(self.num_binvars)] 
+        bin_name_list = []
+        for item in self.gurobi_model.getVars():
+            if item.vtype == GRB.BINARY:
+                name = item.VarName
+                if name not in bin_name_list:
+                    bin_name_list.append(name)
+        self.bin_x_cqm = [dimod.Binary(name) for name in bin_name_list]
         self.bin_lambda_cqm = [dimod.Binary(f'lambda_bin_{i}') for i in range(self.lambda_bits)]
         self.cqm = dimod.ConstrainedQuadraticModel()
         self.cqm.set_objective(sum(self.bin_x_cqm[i] * self.obj_c[i] for i in range(self.num_binvars)) + \
@@ -454,15 +460,15 @@ class Model2QUBO:
         # Set the MAP Constr
         self.MAP.addMConstr(self.A_map, self.bin_x, self.map_relation, self.rhs_map, name=f'MAP_init_constraints')
 
-    def build_QUBO_master_problem(self, penalty=10):
+    def build_QUBO_master_problem(self):
         num_map_constrs =  len(self.map_relation)
         Qubo_obj = np.concatenate((self.obj_c, self.lambda_coeff))
         self.bifurcation_QUBO = np.diag(Qubo_obj)
         self.qubo_slack_dict = {}
         for const_ in range(num_map_constrs):
             lhs = np.concatenate((self.A_map[const_] , np.zeros_like(self.lambda_coeff)))
-            self.bifurcation_QUBO, self.qubo_slack_dict  = QUBO_Cons_selection(self.bifurcation_QUBO, lhs, self.map_relation[const_],
-                                                                                self.rhs_map[const_], round_num= 0, penalty=penalty,
+            self.bifurcation_QUBO, self.qubo_slack_dict  = QUBO_Cons_selection(self.bifurcation_QUBO, lhs, self.map_relation[const_],\
+                                                                                self.rhs_map[const_], round_num= 0, penalty=10, \
                                                                                     dictionary = self.qubo_slack_dict)
 
     def solve_master_problem(self, count=0):
@@ -608,8 +614,8 @@ class Model2QUBO:
             if i >= self.mcut_num:
                 break
         self.lambda_lower = max(lambda_lower_list)
-
-    def bifurcation_solve_for_value(self, count=0, max_steps=1e5, penalty=10):
+    
+    def bifurcation_solve_for_value(self, count=0, penalty = 10):
         with open(f'LP_output_dwave\LP_output_MAP_{count}.lp', 'w') as f:
             dimod.lp.dump(self.cqm, f)
         bqm, inverter = cqm_to_bqm(self.cqm, penalty)
@@ -627,7 +633,7 @@ class Model2QUBO:
         Q_tensor = torch.from_numpy(self.bifurcation_QUBO)
 
         st = time.time()
-        best_vector, best_val = sb.minimize(Q_tensor, max_steps=max_steps, agents=2048, input_type="binary", device="cuda")
+        best_vector, _ = sb.minimize(Q_tensor, max_steps=1e5 , agents = 2048, input_type="binary",device="cuda")
         et = time.time()
         exe_time = (et - st) * 1000
         
@@ -647,15 +653,22 @@ class Model2QUBO:
 
         self.obj_value = sum(best_bin_vector[i] * self.obj_c[i] for i in range(self.num_binvars)) + self.lambda_lower
                         
-        return best_vector, best_val, self.obj_value
-
-    def bifurcation_solve_for_value_classic(self, count=0, max_steps=1e5, num_agents=256):
+        Bifurcation_data = {}
+        time_data = {
+            "time_start": st,
+            "time_end": et,
+            "time_exec": exe_time
+        }
+        Bifurcation_data["time_data"] = time_data
+        dest_path = os.path.join(os.getcwd(), "data_output", f"Bifurcation_info-round-{count}.json")
+        create_config_file(dest_path, Bifurcation_data, count)
+            
+    def bifurcation_solve_for_value_classic(self, count=0, penalty = 10):
         #np.save(f"LP_output_dwave\bifurcation_round_{count}.npy", self.bifurcation_QUBO) # maybe for future use
         Q_tensor = torch.from_numpy(self.bifurcation_QUBO)
-        print("Q: ", Q_tensor)
 
         st = time.time()
-        best_vector, best_val = sb.minimize(Q_tensor, max_steps=max_steps, agents=num_agents, input_type="binary",device="cuda")
+        best_vector, best_val = sb.minimize(Q_tensor, max_steps=5e5 , agents = 128, input_type="binary",device="cuda")
         et = time.time()
         exe_time = (et - st) * 1000
 
@@ -671,9 +684,16 @@ class Model2QUBO:
         # Calculate lambda_connection
         self.lambda_lower = np.sum([self.lambda_coeff[i] * lambda_values[i] for i in range(self.lambda_bits)])
         self.obj_value = sum(best_bin_vector[i] * self.obj_c[i] for i in range(self.num_binvars)) + self.lambda_lower
-        obj_non_lambda = self.obj_value - self.lambda_lower
-        return best_vector, best_val, self.obj_value, obj_non_lambda
-
+        
+        Bifurcation_data = {}    
+        time_data = {
+            "time_start": st,
+            "time_end": et,
+            "time_exec": exe_time
+        }
+        Bifurcation_data["time_data"] = time_data
+        dest_path = os.path.join(os.getcwd(), "data_output", f"Bifurcation_info-round-{count}.json")
+        create_config_file(dest_path, Bifurcation_data, count)
 
     def openjij_solve_for_value(self, count=0, penalty = 10):
         #np.save(f"LP_output_dwave\Openjij_round_{count}.npy", self.bifurcation_QUBO) # maybe for future use
@@ -1059,39 +1079,25 @@ class Model2QUBO:
             self.master_constraint_dict.update({f"c-round-{counter}":  [[self.MAP_next_lhs[m] for m in range(len(self.MAP_next_lhs))] \
                 + [self.lambda_coeff[n] for n in range(self.lambda_bits)] , equality, self.MAP_next_rhs] })
                 
-    def run(self, penalty=100, max_steps=1e5, num_agents=256):
-
-        assert self.dwave_solver in ["bifurcation", "openjij"], "must use bifurcation or openjij"
+    def run(self):
+        lambda_upper_list = []
+        lambda_lower_list = []
+        obj_value_list = []
+        ralative_gap = np.round(abs(self.lambda_upper - self.lambda_lower) / abs(self.lambda_upper) *100 , 3)
+        abs_gap = abs(self.lambda_upper - self.lambda_lower)
+        cunt = 1
         
-        # set torch default tensor type to double
-        torch.set_default_tensor_type(torch.DoubleTensor)
-        # set all torch tensors to use the same device as the model
-        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        torch.set_default_device(device)
-
-        self.build_QUBO_master_problem(penalty=penalty)
-        vec, val, obj, non_lambda = self.bifurcation_solve_for_value_classic(max_steps=max_steps, num_agents=num_agents)
-
-        print("SB solution vector:", len(vec))
-        print("SB solution value:", val)
-        print("SB objective value:", obj)
-        print("SB non-lambda objective value:", non_lambda)
-
-        # # extract the solution
-        # sol_vec = vec[:self.gurobi_model.num_vars]
-        # # assign the solution to the model
-        # i = 0
-        # for j, var in enumerate(self.gurobi_model.getVars()):
-        #     if var.vtype == GRB.BINARY:
-        #         # assign the binary variable by setting a constraint
-        #         self.gurobi_model.addConstr(var == sol_vec[i], name=f"assign_{j}")
-        #         i += 1
-        # # update the model
-        # self.gurobi_model.update()
-        # self.gurobi_model.optimize()
-        # # get the objective value
-        # obj = self.gurobi_model.ObjVal
-        # print("SB model objective value:", obj)
+        if self.threshold_type == "relative":
+            gap = ralative_gap
+        elif self.threshold_type == "absolute":
+            gap = abs_gap
+        
+        assert self.Hybrid_mode 
+        # assert self.dwave_solver not in ["bifurcation", "openjij"]
+        
+        self.build_cqm_master_problem()
 
 
-        return vec, val, obj, non_lambda
+        return self.cqm
+            
+

@@ -4,7 +4,7 @@ import pickle
 import time
 
 from src.circuit import QIG, QASM_FILES, RandomQIG
-from src.solver import TACO, TACOORIG, TACONL, TACOL, callback
+from src.solver import TACO, TACOORIG, TACONL, TACOL
 
 
 def test_solver(SolverClass, qig: QIG, mems: list, comms: list, W: int, timeout: int=600):
