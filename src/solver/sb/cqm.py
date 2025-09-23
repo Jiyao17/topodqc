@@ -9,6 +9,7 @@ from dimod.binary.binary_quadratic_model import BinaryQuadraticModel, Binary, Sp
 from dimod.discrete.discrete_quadratic_model import DiscreteQuadraticModel
 from dimod import ConstrainedQuadraticModel, Binary
 from dimod import cqm_to_bqm
+from dimod.constrained.constrained import CQMToBQMInverter
 #import dwave.inspector
 #import dwave.system
 from dwave.system import LeapHybridCQMSampler
@@ -1094,7 +1095,7 @@ class CQMConverter:
         elif self.threshold_type == "absolute":
             gap = abs_gap
         
-        assert self.Hybrid_mode 
+        # assert self.Hybrid_mode 
         # assert self.dwave_solver not in ["bifurcation", "openjij"]
         
         self.build_cqm_master_problem()
@@ -1114,16 +1115,25 @@ if __name__ == "__main__":
     model.addConstr(x1 * x2 <= x3)
     model.addConstr(x2 * x3 <= x4)
 
-    expr = x1 * x3
-    model.setObjective(expr * x4, sense=GRB.MINIMIZE)
+    model.addConstr(x1 * x2 == x4)
+    model.setObjective(x3 * x4, sense=GRB.MINIMIZE)
 
-    cqm = CQMConverter(model).run()
-    bqm = dimod.cqm_to_bqm(cqm)
+
+
+    PROJ_DIR = '/home/ljy/projects/topodqc/'
+    config_file = 'src/solver/HQCMCBD/config.json'
+    abs_path = PROJ_DIR + config_file
+    cqm = CQMConverter(model, mode='manual', config_file=abs_path).run()
+    # print all variables
+    # for v in cqm.get:
+    #     print(v, cqm.get_variable_type(v))
+    bqm, converter = dimod.cqm_to_bqm(cqm)
     # solve this cqm with simulated annealing
     sampler = SimulatedAnnealingSampler()
     samples = sampler.sample(bqm, num_reads=10)
 
     best_sample = samples.first.sample
+    best_sample = CQMToBQMInverter(best_sample)
     print("Best sample:", best_sample)
 
     print("Objective value:", samples.first.energy)
