@@ -9,7 +9,10 @@
             "type": "debugpy",
             "request": "launch",
             // "module": "src.solver.original"
-            "module": "src.circuit.qig"
+            // "module": "src.circuit.qig",
+            // "module": "src.solver.qboson.sa",
+            "module": "src.solver.taco_l",
+            "python": "${command:python.interpreterPath}"
 
         }
     ]

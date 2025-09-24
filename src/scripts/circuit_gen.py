@@ -129,6 +129,6 @@ def qaoa_gen(num_qubits: int, folder: str):
 
 if __name__ == "__main__":
     circuit_folder = 'src/circuit/src/'
-    # qft_gen(512, circuit_folder)
-    # grover_gen(512, circuit_folder)
-    qaoa_gen(512, circuit_folder)
+    # qft_gen(4, circuit_folder)
+    # grover_gen(4, circuit_folder)
+    qaoa_gen(4, circuit_folder)

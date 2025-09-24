@@ -32,6 +32,7 @@ class TACO:
             mems: list[ProcMemNum], 
             comms: list[ProcCommNum],
             W: int,
+            edge_weights: dict[tuple[int, int], float]=None,
             timeout: int = 600
             ) -> None:
         self.qig = qig
@@ -40,6 +41,7 @@ class TACO:
         # communication qubit number of each processor
         self.comms = comms
         self.W = W
+        self.edge_weights = edge_weights
         self.timeout = timeout
 
         self.squbits = { a: node for a, node in enumerate(qig.graph.nodes) }
@@ -48,6 +50,9 @@ class TACO:
                                 for a, node in enumerate(qig.graph.nodes) }
         self.qpus = { i: mem for i, mem in enumerate(mems) }
         self.qpus_rev = { mem: i for i, mem in enumerate(mems) }
+
+        self.edge_weights = {}
+
         self.c = {}
         for a in self.squbits:
             for b in self.squbits:
@@ -98,14 +103,15 @@ class TACO:
     def add_alloc_constrs(self):
         # each node is allocated to exactly one processor
         for a in self.squbits:
-            self.model.addConstr(gp.quicksum(self.x[a, i] for i in self.qpus) == 1)
+            self.model.addConstr(gp.quicksum(self.x[a, i] for i in self.qpus) == 1, name=f'alloc_constr_{a}')
 
         # processor capacity constraint
         for i in self.qpus:
             self.model.addConstr(
                 # gp.quicksum(self.x[a, i] for a in self.qubits) 
                 gp.quicksum(self.squbits_sizes[a] * self.x[a, i] for a in self.squbits) 
-                    <= self.qpus[i])
+                    <= self.qpus[i],
+                name=f'proc_mem_constr_{i}')
             
     def set_obj(self):
         pass

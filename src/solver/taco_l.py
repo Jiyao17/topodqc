@@ -1,6 +1,7 @@
 
 
 
+from pyexpat import model
 import gurobipy as gp
 import numpy as np
 
@@ -16,10 +17,12 @@ class TACOL(TACO):
             mems: list[ProcMemNum], 
             comms: list[ProcMemNum], 
             W: int,
+            edge_weights: dict[tuple[int, int], float]=None,
             timeout: int = 600
             ) -> None:
-        super().__init__(qig, mems, comms, W, timeout)
-        
+        super().__init__(qig, mems, comms, W, edge_weights, timeout)
+
+
         # set NonConvex to 1
         # self.model.setParam('NonConvex', 1)
 
@@ -43,21 +46,22 @@ class TACOL(TACO):
                                 y_expr += self.x[a, i] * self.x[b, j] + self.x[b, i] * self.x[a, j]
 
                     self.y[i, j] = self.model.addVar(vtype=gp.GRB.BINARY, name=f'y_{i}_{j}')
-                    self.model.addConstr(self.y[i, j] <= y_expr)
+                    self.model.addConstr(self.y[i, j] <= y_expr, name=f'y_def1_{i}_{j}')
                     # self.model.addConstr(y_expr <= self.y[i, j] * (len(self.squbits) // 2))
-                    self.model.addConstr(y_expr <= self.y[i, j] * (len(self.squbits) * (len(self.squbits) - 1)))
+                    self.model.addConstr(y_expr <= self.y[i, j] * (len(self.squbits) * (len(self.squbits) - 1)),
+                                         name=f'y_def2_{i}_{j}')
 
                     # self.model.addConstr(y <= self.y[i, j] * len(self.qubits))
                     
                     # for start node i
                     oflow = gp.quicksum(self.p[i, j, i, u] for u in self.qpus if u != i)
                     iflow = gp.quicksum(self.p[i, j, u, i] for u in self.qpus if u != i)
-                    self.model.addConstr((oflow - iflow) == self.y[i, j])
+                    self.model.addConstr((oflow - iflow) == self.y[i, j], name=f'flow_constr_start_{i}_{j}')
                     # self.model.addConstr(oflow - iflow == 1)
                     # for end node j
                     oflow = gp.quicksum(self.p[i, j, j, u] for u in self.qpus if u != j)
                     iflow = gp.quicksum(self.p[i, j, u, j] for u in self.qpus if u != j)
-                    self.model.addConstr((oflow - iflow) == -self.y[i, j])
+                    self.model.addConstr((oflow - iflow) == -self.y[i, j], name=f'flow_constr_end_{i}_{j}')
                     # self.model.addConstr(oflow - iflow == -1)
                     # for intermediate nodes
                     for u in self.qpus:
@@ -65,7 +69,7 @@ class TACOL(TACO):
                             oflow = gp.quicksum(self.p[i, j, u, v] for v in self.qpus if v != u)
                             iflow = gp.quicksum(self.p[i, j, v, u] for v in self.qpus if v != u)
                             # add the cubic term constraint
-                            self.model.addConstr((oflow - iflow) == 0)
+                            self.model.addConstr((oflow - iflow) == 0, name=f'flow_constr_inter_{i}_{j}_{u}')
                             # self.model.addConstr(oflow - iflow == 0)
                     
         # cancel no demand path
@@ -80,7 +84,7 @@ class TACOL(TACO):
                                 # self.model.addConstr(self.p[i, j, u, v] <= self.y[i, j])
                                 # self.model.addConstr(self.p[i, j, v, u] <= self.y[i, j])
                                 # self.model.addConstr(self.p[i, j, u, v] + self.p[i, j, v, u] <= self.y[i, j])
-                    self.model.addConstr(usage <= self.y[i, j] * (len(self.qpus) - 1))
+                    self.model.addConstr(usage <= self.y[i, j] * (len(self.qpus) - 1), name=f'path_usage_{i}_{j}')
 
     def add_topology_constrs(self):
         self.w = {}
@@ -95,12 +99,12 @@ class TACOL(TACO):
                             if i < j:
                                 w += self.p[i, j, u, v] + self.p[i, j, v, u]
                                 
-                    self.model.addConstr(self.w[u, v] <= w)
-                    self.model.addConstr(w <= self.w[u, v] * len(self.qpus) * (len(self.qpus) - 1))
+                    self.model.addConstr(self.w[u, v] <= w, name=f'edge_usage1_{u}_{v}')
+                    self.model.addConstr(w <= self.w[u, v] * len(self.qpus) * (len(self.qpus) - 1), name=f'edge_usage2_{u}_{v}')
                     # self.model.addConstr(w <= self.w[u, v] * len(self.procs) * len(self.procs))
-                    total += self.w[u, v]
+                    total += self.w[u, v] 
 
-        self.model.addConstr(total <= self.W)
+        self.model.addConstr(total <= self.W, name='total_edge_usage')
 
         for u in self.qpus:
             adj = 0
@@ -110,19 +114,24 @@ class TACOL(TACO):
                         adj += self.w[u, z]
                     else:
                         adj += self.w[z, u]
-            self.model.addConstr(adj <= self.comms[u])
+            self.model.addConstr(adj <= self.comms[u], name=f'comm_{u}')
                     
     def set_obj(self):
         total = 0
-        self.path_lens = {}
+        demand_ub = sum(self.c[a, b] for a in self.squbits for b in self.squbits if a < b and self.c[a, b] > 0)
         for i in self.qpus:
             for j in self.qpus:
                 if i < j:
-                    path_len = 0
+                    path_weight = 0
                     for u in self.qpus:
                         for v in self.qpus:
                             if u < v:
-                                path_len += self.p[i, j, u, v] + self.p[i, j, v, u]
+                                if self.edge_weights is not None and (u, v) in self.edge_weights:
+                                    weight = self.edge_weights[u, v]
+                                else:
+                                    weight = 1
+                                path_weight += (self.p[i, j, u, v] + self.p[i, j, v, u]) * weight
+                    
                     _demand = 0
                     for a in self.squbits:
                         for b in self.squbits:
@@ -130,11 +139,11 @@ class TACOL(TACO):
                                 _demand += self.c[a, b] * self.x[a, i] * self.x[b, j] \
                                             + self.c[a, b] * self.x[b, i] * self.x[a, j]
 
-                    demand = self.model.addVar(vtype=gp.GRB.INTEGER)
-                    self.model.addConstr(demand == _demand)
+                    demand = self.model.addVar(vtype=gp.GRB.INTEGER, name=f'demand_{i}_{j}', lb=0, ub=demand_ub)
+                    self.model.addConstr(demand == _demand, name=f'demand_constr_{i}_{j}')
                     # self.model.addConstr(_demand >= demand)
 
-                    total += path_len * demand
+                    total += path_weight * demand
 
         self.model.setObjective(total, gp.GRB.MINIMIZE)
 
@@ -142,23 +151,23 @@ class TACOL(TACO):
 
 if __name__ == "__main__":
     np.random.seed(0)
-    proc_num = 8
-    mem = 8
-    comm = 4
+    proc_num = 4
+    mem = 4
+    comm = 2
 
-    qubit_num = 256
+    qubit_num = 16
     demand_pair = int(qubit_num * (qubit_num-1) / 2) # max
     # demand_pair = int(qubit_num * (qubit_num-1) / 6) # max
     # demand_pair = qubit_num * 2 # moderate
 
-    qig = RandomQIG(qubit_num, demand_pair, (1, 11))
+    # qig = RandomQIG(qubit_num, demand_pair, (1, 11))
     # print(sorted(qig.demands))
-    # qig = QIG.from_qasm('src/circuit/src/0410184_169.qasm')
+    qig = QIG.from_qasm('src/circuit/src/grover_16.qasm')
     # qig.contract(4, inplace=True)
 
     # 256 homogeneous
-    mems = [32, ] * 8
-    comms = [8, ] * 8
+    mems = [mem, ] * proc_num
+    comms = [comm, ] * proc_num
 
     # mems = [64, 64, 32, 32, 16, 16, 16, 16]
     # comms = [16, 16, 8, 8, 4, 4, 4, 4]
@@ -173,17 +182,31 @@ if __name__ == "__main__":
     # W = (proc_num - 1)
     # W = proc_num  + 1
 
-    qig.contract_hdware_constrained(mems, inplace=True)
+    # qig.contract_hdware_constrained(mems, inplace=True)
     # qig.contract_greedy(8, inplace=True)
 
-    model = TACOL(qig, mems, comms, W)
-    model.build()
-    print(model.solve())
+    tacol = TACOL(qig, mems, comms, W,)
+    tacol.build()
+    tacol.model.update()
+
+    print("var num:", tacol.model.numVars)
+    print("constr num:", tacol.model.numConstrs)
+    # print(tacol.solve())
+
+    # set all edge variables w to the solution
+    # for u in tacol.qpus:
+    #     for v in tacol.qpus:
+    #         if u < v:
+    #             # print((u, v), tacol.w[u, v].x)
+    #             if tacol.w[u, v].x > 0.5:
+    #                 tacol.model.addConstr(tacol.w[u, v] == 1, name=f'fix_w_{u}_{v}')
+    #             else:
+    #                 tacol.model.addConstr(tacol.w[u, v] == 0, name=f'fix_w_{u}_{v}')
+    # tacol.model.update()
 
     # print(model.qubits_sizes)
     # print(model.c)
     # print(model.procs)
-
 
     # for a in model.qubits:
     #     for i in model.procs:
@@ -191,3 +214,13 @@ if __name__ == "__main__":
     
     # path_lengths = model.get_results()
     # print(path_lengths)
+
+    # check var types
+    # for v in tacol.model.getVars():
+    #     assert v.VType in [gp.GRB.BINARY], f"Var {v.VarName} has type {v.VType}, expected BINARY"
+    from src.solver.qboson.sa import SASolver
+    sa = SASolver(process_num=6)
+    slack_bound = max(proc_num, mem)
+    best_vals = sa.solve(tacol.model, slack_bound=slack_bound, penalty_strength=10.0)
+    print("Best values over time (time, obj, violation):")
+    print(best_vals)
