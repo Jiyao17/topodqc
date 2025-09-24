@@ -192,9 +192,12 @@ class SASolver(object):
             alpha=0.99,
             cutoff_temperature=1e-3,
             iterations_per_t=10,
-            size_limit=100,
+            size_limit=5000,
             process_num=process_num
             )
+        
+    def post_process(self, result: np.ndarray) -> dict:
+        pass 
 
     def solve(self, 
             gurobi_model: gp.Model, 
@@ -220,11 +223,12 @@ class SASolver(object):
         best_vals = []
         while time.time() - time_start < timeout:
             # print(f"SA loop {i+1}/{loop_num}")
-            # results = self.sa.solve(J, best_sol)
-            results = self.sa.solve(J)
+            results = self.sa.solve(J, best_sol)
+            # results = self.sa.solve(J)
         
             # report best solution and its objective value that satisfies all constraints
             for result in results:
+                # result = kw.sampler.constraint_sampler(Q, b, , result)
                 sol_dict = qubo_model.get_sol_dict(result)
                 val = qubo_model.get_value(sol_dict)
 
@@ -263,7 +267,9 @@ if __name__ == "__main__":
     model.optimize()
 
 
-    sa = SASolver(size_limit=10000, process_num=4)
-    best_vals = sa.solve(model, slack_bound=7, penalty_strength=10.0)
+    sa = SASolver(process_num=4)
+    best_vals = sa.solve(model, slack_bound=7, penalty_strength=100.0, timeout=10)
     print("Best values over time (time, obj, violation):")
     print(best_vals)
+
+    

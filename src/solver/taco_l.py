@@ -151,18 +151,18 @@ class TACOL(TACO):
 
 if __name__ == "__main__":
     np.random.seed(0)
-    proc_num = 4
-    mem = 4
+    proc_num = 2
+    mem = 2
     comm = 2
 
-    qubit_num = 16
+    qubit_num = 4
     demand_pair = int(qubit_num * (qubit_num-1) / 2) # max
     # demand_pair = int(qubit_num * (qubit_num-1) / 6) # max
     # demand_pair = qubit_num * 2 # moderate
 
     # qig = RandomQIG(qubit_num, demand_pair, (1, 11))
     # print(sorted(qig.demands))
-    qig = QIG.from_qasm('src/circuit/src/grover_16.qasm')
+    qig = QIG.from_qasm('src/circuit/src/grover_4.qasm')
     # qig.contract(4, inplace=True)
 
     # 256 homogeneous
@@ -221,6 +221,12 @@ if __name__ == "__main__":
     from src.solver.qboson.sa import SASolver
     sa = SASolver(process_num=6)
     slack_bound = max(proc_num, mem)
-    best_vals = sa.solve(tacol.model, slack_bound=slack_bound, penalty_strength=10.0)
+    best_vals = sa.solve(
+        tacol.model, 
+        slack_bound=slack_bound, 
+        penalty_strength=10.0,
+        timeout=600
+        )
     print("Best values over time (time, obj, violation):")
     print(best_vals)
+
