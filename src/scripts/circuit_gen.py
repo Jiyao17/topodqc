@@ -3,8 +3,10 @@
 # this file is used to generate quantum circuits in .qasm format
 
 import itertools
+import time
+
 from qiskit import QuantumCircuit, transpile
-from qiskit.circuit.library import QFT, grover_operator, MCMTGate, ZGate
+from qiskit.circuit.library import QFT, grover_operator, MCMTGate, HGate, ZGate
 from qiskit import qasm2
 from qiskit.circuit.library import QAOAAnsatz
 from qiskit_optimization.applications import Maxcut
@@ -22,8 +24,11 @@ def qft_gen(num_qubits: int, folder: str):
     basis_gates = ['u3', 'cx']
     # qft_circuit.decompose(gates_to_decompose=basis_gates)
     # qft_circuit.measure_all()
+    start_time = time.time()
     qft_circuit = transpile(qft_circuit, basis_gates=basis_gates, optimization_level=3)
-    
+    end_time = time.time()
+    print(f"QFT transpile time for {num_qubits} qubits: {end_time - start_time:.2f} seconds")
+
     filename = folder + f'qft_{num_qubits}.qasm'
     qasm2.dump(qft_circuit, filename)
 
@@ -91,7 +96,7 @@ def grover_gen(num_qubits: int, folder: str):
     basis_gates = ['u3', 'cx']
     # qft_circuit.decompose(gates_to_decompose=basis_gates)
     # qft_circuit.measure_all()
-    grover_circuit = transpile(grover_circuit, basis_gates=basis_gates, optimization_level=3)
+    grover_circuit = transpile(grover_circuit, basis_gates=basis_gates)
 
     filename = folder + f'grover_{num_qubits}.qasm'
     qasm2.dump(grover_circuit, filename)
@@ -100,10 +105,10 @@ def grover_gen(num_qubits: int, folder: str):
 
 def qaoa_gen(num_qubits: int, folder: str):
     # a random graph for Max-Cut using Erdos-Renyi model
-    graph: nx.Graph = nx.erdos_renyi_graph(n=num_qubits, p=0.2, seed=42)
+    graph: nx.Graph = nx.erdos_renyi_graph(n=num_qubits, p=0.5, seed=42)
     # set random weights to edges
     for u, v in graph.edges():
-        graph[u][v]['weight'] = np.random.randint(1, 10)
+        graph[u][v]['weight'] = np.random.rand() + 0.01  # avoid zero weight
     print("graph generated")
     maxcut = Maxcut(graph)
     print("maxcut instance created")
@@ -117,18 +122,44 @@ def qaoa_gen(num_qubits: int, folder: str):
     qaoa_circuit.assign_parameters(
         {param: np.pi/2 for param in qaoa_circuit.parameters}, inplace=True
     )
-    qaoa_circuit.measure_all()
-
     basis_gates = ['u3', 'cx']
-    qaoa_circuit = transpile(qaoa_circuit, basis_gates=basis_gates, optimization_level=3)
+    qaoa_circuit = transpile(qaoa_circuit, basis_gates=basis_gates)
 
     filename = folder + f'qaoa_{num_qubits}.qasm'
     qasm2.dump(qaoa_circuit, filename)
 
     print(f"QASM file '{filename}' created successfully.")
 
+
+def mcmt_gen(num_qubits: int, folder: str):
+    """
+    Generate a quantum circuit with a multi-controlled multi-target (MCMT) gate.
+    Default gate is a H gate, can be changed in the code below.
+    """
+    num_cqubits: int = num_qubits // 2
+    num_tqubits: int = num_qubits - num_cqubits
+    mcmt_circuit = QuantumCircuit(num_cqubits + num_tqubits)
+    mcmt_gate = MCMTGate(HGate(), num_cqubits, num_tqubits)
+    mcmt_circuit.append(mcmt_gate, range(num_cqubits + num_tqubits))
+    mcmt_circuit.measure_all()
+
+    basis_gates = ['u3', 'cx']
+    mcmt_circuit = transpile(mcmt_circuit, basis_gates=basis_gates)
+
+    filename = folder + f'mcmt_{num_cqubits}c_{num_tqubits}t.qasm'
+    qasm2.dump(mcmt_circuit, filename)
+
+    print(f"QASM file '{filename}' created successfully.")
+
+
 if __name__ == "__main__":
     circuit_folder = 'src/circuit/src/'
-    # qft_gen(4, circuit_folder)
-    # grover_gen(4, circuit_folder)
-    qaoa_gen(4, circuit_folder)
+    # sizes = [256, 384, 512, 768, 1024]
+    # sizes = [256, 384, 512]
+    # sizes = [256*6, 256*8]
+    sizes = [192, ]
+    for size in sizes:
+        # print(f"Generating circuits of size {size}...")
+        mcmt_gen(size, circuit_folder)
+        qft_gen(size, circuit_folder)
+        grover_gen(size, circuit_folder)

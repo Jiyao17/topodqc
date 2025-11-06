@@ -1,7 +1,8 @@
 
 
 
-from pyexpat import model
+import sys
+
 import gurobipy as gp
 import numpy as np
 
@@ -12,6 +13,7 @@ from .type import ProcMemNum
 
 
 class TACOL(TACO):
+    
     def __init__(self, 
             qig: QIG, 
             mems: list[ProcMemNum], 
@@ -20,9 +22,13 @@ class TACOL(TACO):
             edge_weights: dict[tuple[int, int], float]=None,
             timeout: int = 600
             ) -> None:
-        super().__init__(qig, mems, comms, W, edge_weights, timeout)
+        super().__init__(qig, mems, comms, W, timeout)
 
-
+        self.edge_weights = edge_weights
+        if self.edge_weights is not None:
+            edge_num = int(len(self.qpus) * (len(self.qpus) - 1) // 2)
+            assert len(self.edge_weights) == edge_num, \
+                "Edge weights length does not match the number of edges."
         # set NonConvex to 1
         # self.model.setParam('NonConvex', 1)
 
@@ -48,9 +54,10 @@ class TACOL(TACO):
                     self.y[i, j] = self.model.addVar(vtype=gp.GRB.BINARY, name=f'y_{i}_{j}')
                     self.model.addConstr(self.y[i, j] <= y_expr, name=f'y_def1_{i}_{j}')
                     # self.model.addConstr(y_expr <= self.y[i, j] * (len(self.squbits) // 2))
-                    self.model.addConstr(y_expr <= self.y[i, j] * (len(self.squbits) * (len(self.squbits) - 1)),
+                    self.model.addConstr(y_expr <= self.y[i, j] * self.mems[i] * self.mems[j],
                                          name=f'y_def2_{i}_{j}')
-
+                    self.model.addConstr(y_expr <= self.mems[i] * self.mems[j],
+                                         name=f'y_expr_{i}_{j}')
                     # self.model.addConstr(y <= self.y[i, j] * len(self.qubits))
                     
                     # for start node i
@@ -84,7 +91,7 @@ class TACOL(TACO):
                                 # self.model.addConstr(self.p[i, j, u, v] <= self.y[i, j])
                                 # self.model.addConstr(self.p[i, j, v, u] <= self.y[i, j])
                                 # self.model.addConstr(self.p[i, j, u, v] + self.p[i, j, v, u] <= self.y[i, j])
-                    self.model.addConstr(usage <= self.y[i, j] * (len(self.qpus) - 1), name=f'path_usage_{i}_{j}')
+                    self.model.addConstr(usage <= self.y[i, j] * (len(self.qpus) // 2) , name=f'path_usage_{i}_{j}')
 
     def add_topology_constrs(self):
         self.w = {}
@@ -106,6 +113,13 @@ class TACOL(TACO):
 
         self.model.addConstr(total <= self.W, name='total_edge_usage')
 
+        # if candidate graph is not complete, add comms constraints
+        # if self.edge_weights is not None:
+        #     for (i, j), weight in self.edge_weights.items():
+        #         if weight >= float('inf'):
+        #             # no edge
+        #             self.model.addConstr(self.w[i, j] == 0, name=f'no_edge_{i}_{j}')
+
         for u in self.qpus:
             adj = 0
             for z in self.qpus:
@@ -126,10 +140,7 @@ class TACOL(TACO):
                     for u in self.qpus:
                         for v in self.qpus:
                             if u < v:
-                                if self.edge_weights is not None and (u, v) in self.edge_weights:
-                                    weight = self.edge_weights[u, v]
-                                else:
-                                    weight = 1
+                                weight = self.edge_weights[u, v] if self.edge_weights is not None else 1
                                 path_weight += (self.p[i, j, u, v] + self.p[i, j, v, u]) * weight
                     
                     _demand = 0
@@ -147,22 +158,31 @@ class TACOL(TACO):
 
         self.model.setObjective(total, gp.GRB.MINIMIZE)
 
-
+    # def get_topology(self):
+        
+    #     edges = []
+    #     for u in self.qpus:
+    #         for v in self.qpus:
+    #             if u < v:
+    #                 if self.w[u, v].x > 0.5:
+    #                     edges.append((u, v))
+    #     return edges
 
 if __name__ == "__main__":
     np.random.seed(0)
     proc_num = 2
-    mem = 2
-    comm = 2
+    mem = 4
+    comm = 1
 
-    qubit_num = 4
-    demand_pair = int(qubit_num * (qubit_num-1) / 2) # max
+    qubit_num = proc_num * mem
+    # demand_pair = int(qubit_num * (qubit_num-1) / 2) # max
     # demand_pair = int(qubit_num * (qubit_num-1) / 6) # max
     # demand_pair = qubit_num * 2 # moderate
 
     # qig = RandomQIG(qubit_num, demand_pair, (1, 11))
     # print(sorted(qig.demands))
-    qig = QIG.from_qasm('src/circuit/src/grover_4.qasm')
+    # qig = QIG.from_qasm('src/circuit/src/mcmt_2c_2t.qasm')
+    qig = QIG.from_qasm('src/circuit/src/grover_8.qasm')
     # qig.contract(4, inplace=True)
 
     # 256 homogeneous
@@ -185,12 +205,24 @@ if __name__ == "__main__":
     # qig.contract_hdware_constrained(mems, inplace=True)
     # qig.contract_greedy(8, inplace=True)
 
+    from src.solver.qboson.sa import SASolver, TACOSA
+
+    sa = SASolver(process_num=16)
     tacol = TACOL(qig, mems, comms, W,)
     tacol.build()
     tacol.model.update()
+    # results = sa.solve(tacol.model, slack_bound=max(proc_num, mem*mem), timeout=600)
+    results = sa.solve(tacol.model, slack_bound=3, timeout=300)
+    # tacosa = TACOSA(qig, mems, comms, W,)
+    # tacosa.build()
+    # tacosa.solve()
 
-    print("var num:", tacol.model.numVars)
-    print("constr num:", tacol.model.numConstrs)
+    # tacol = TACOL(qig, mems, comms, W,)
+    # tacol.build()
+    # tacol.model.update()
+
+    # print("var num:", tacol.model.numVars)
+    # print("constr num:", tacol.model.numConstrs)
     # print(tacol.solve())
 
     # set all edge variables w to the solution
@@ -218,15 +250,13 @@ if __name__ == "__main__":
     # check var types
     # for v in tacol.model.getVars():
     #     assert v.VType in [gp.GRB.BINARY], f"Var {v.VarName} has type {v.VType}, expected BINARY"
-    from src.solver.qboson.sa import SASolver
-    sa = SASolver(process_num=6)
-    slack_bound = max(proc_num, mem)
-    best_vals = sa.solve(
-        tacol.model, 
-        slack_bound=slack_bound, 
-        penalty_strength=10.0,
-        timeout=600
-        )
-    print("Best values over time (time, obj, violation):")
-    print(best_vals)
+    # sa = SASolver(process_num=1)
+    # slack_bound = max(proc_num, mem)
+    # best_vals = sa.solve(
+    #     tacol.model, 
+    #     slack_bound=slack_bound, 
+    #     timeout=600
+    #     )
+    # print("Best values over time (time, obj, violation):")
+    # print(best_vals)
 

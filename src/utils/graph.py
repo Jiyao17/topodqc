@@ -94,13 +94,13 @@ def draw(graph: nx.Graph, edge_labels: dict=None, node_labels: dict=None, filena
     Draw the graph using matplotlib
     """
     layout = nx.spring_layout(graph)
-    nx.draw(graph, pos=layout, with_labels=False, node_size=500, node_color='lightblue', font_size=8)
+    nx.draw(graph, pos=layout, with_labels=False, node_size=200, node_color='lightblue', font_size=16)
 
     
     if edge_labels:
         nx.draw_networkx_edge_labels(graph, pos=layout, edge_labels=edge_labels)
     if node_labels:
-        nx.draw_networkx_labels(graph, pos=layout, labels=node_labels, font_size=8, font_color='red')
+        nx.draw_networkx_labels(graph, pos=layout, labels=node_labels, font_size=16, font_color='red')
     
     if filename:
         plt.savefig(filename)
@@ -108,6 +108,15 @@ def draw(graph: nx.Graph, edge_labels: dict=None, node_labels: dict=None, filena
         plt.show()
 
     plt.close()
+
+def draw_topology(edges: list[tuple], filename: str=None):
+    """
+    Draw the topology given the edges
+    """
+    graph = nx.Graph()
+    graph.add_edges_from(edges)
+    node_labels = { node: str(node) for node in graph.nodes }
+    draw(graph, node_labels=node_labels, filename=filename)
 
 if __name__ == "__main__":
     nodes = [1, 2, 3, 4]

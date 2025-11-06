@@ -12,16 +12,66 @@ from .type import Qubits, Demand
 from ..utils.graph import contract_edge, draw
 
 
-QASM_FILES = [
-    # "src/circuit/src/0410184_169.qasm",
-    "src/circuit/src/adr4_197.qasm",
-    "src/circuit/src/clip_206.qasm",
-    # "src/circuit/src/cm42a_207.qasm",
-    "src/circuit/src/co14_215.qasm",
-    # "src/circuit/src/dc2_222.qasm",
-    # "src/circuit/src/ham15_107.qasm",
-    # "src/circuit/src/misex1_241.qasm",
-]
+QASM_FILES = {
+    ('QFT', 4): 'src/circuit/src/qft_4.qasm',
+    ('QFT', 8): 'src/circuit/src/qft_8.qasm',
+    ('QFT', 16): 'src/circuit/src/qft_16.qasm',
+    ('QFT', 24): 'src/circuit/src/qft_24.qasm',
+    ('QFT', 32): 'src/circuit/src/qft_32.qasm',
+    ('QFT', 48): 'src/circuit/src/qft_48.qasm',
+    ('QFT', 64): 'src/circuit/src/qft_64.qasm',
+    ('QFT', 96): 'src/circuit/src/qft_96.qasm',
+    ('QFT', 128): 'src/circuit/src/qft_128.qasm',
+    ('QFT', 192): 'src/circuit/src/qft_192.qasm',
+    ('QFT', 256): 'src/circuit/src/qft_256.qasm',
+    ('QFT', 384): 'src/circuit/src/qft_384.qasm',
+    ('QFT', 512): 'src/circuit/src/qft_512.qasm',
+    ('QFT', 768): 'src/circuit/src/qft_768.qasm',
+    ('QFT', 1024): 'src/circuit/src/qft_1024.qasm',
+    ('Grover', 4): 'src/circuit/src/grover_4.qasm',
+    ('Grover', 8): 'src/circuit/src/grover_8.qasm',
+    ('Grover', 16): 'src/circuit/src/grover_16.qasm',
+    ('Grover', 24): 'src/circuit/src/grover_24.qasm',
+    ('Grover', 32): 'src/circuit/src/grover_32.qasm',
+    ('Grover', 48): 'src/circuit/src/grover_48.qasm',
+    ('Grover', 64): 'src/circuit/src/grover_64.qasm',
+    ('Grover', 96): 'src/circuit/src/grover_96.qasm',
+    ('Grover', 128): 'src/circuit/src/grover_128.qasm',
+    ('Grover', 192): 'src/circuit/src/grover_192.qasm',
+    ('Grover', 256): 'src/circuit/src/grover_256.qasm',
+    ('Grover', 384): 'src/circuit/src/grover_384.qasm',
+    ('Grover', 512): 'src/circuit/src/grover_512.qasm',
+    ('Grover', 768): 'src/circuit/src/grover_768.qasm',
+    ('Grover', 1024): 'src/circuit/src/grover_1024.qasm',
+    ('QAOA', 4): 'src/circuit/src/qaoa_4.qasm',
+    ('QAOA', 8): 'src/circuit/src/qaoa_8.qasm',
+    ('QAOA', 16): 'src/circuit/src/qaoa_16.qasm',
+    ('QAOA', 24): 'src/circuit/src/qaoa_24.qasm',
+    ('QAOA', 32): 'src/circuit/src/qaoa_32.qasm',
+    ('QAOA', 48): 'src/circuit/src/qaoa_48.qasm',
+    ('QAOA', 64): 'src/circuit/src/qaoa_64.qasm',
+    ('QAOA', 72): 'src/circuit/src/qaoa_72.qasm',
+    ('QAOA', 96): 'src/circuit/src/qaoa_96.qasm',
+    ('QAOA', 128): 'src/circuit/src/qaoa_128.qasm',
+    ('QAOA', 256): 'src/circuit/src/qaoa_256.qasm',
+    ('QAOA', 512): 'src/circuit/src/qaoa_512.qasm',
+    ('MCMT', 4): 'src/circuit/src/mcmt_2c_2t.qasm',
+    ('MCMT', 8): 'src/circuit/src/mcmt_4c_4t.qasm',
+    ('MCMT', 16): 'src/circuit/src/mcmt_8c_8t.qasm',
+    ('MCMT', 24): 'src/circuit/src/mcmt_12c_12t.qasm',
+    ('MCMT', 32): 'src/circuit/src/mcmt_16c_16t.qasm',
+    ('MCMT', 64): 'src/circuit/src/mcmt_32c_32t.qasm',
+    ('MCMT', 96): 'src/circuit/src/mcmt_48c_48t.qasm',
+    ('MCMT', 128): 'src/circuit/src/mcmt_64c_64t.qasm',
+    ('MCMT', 192): 'src/circuit/src/mcmt_96c_96t.qasm',
+    ('MCMT', 256): 'src/circuit/src/mcmt_128c_128t.qasm',
+    ('MCMT', 384): 'src/circuit/src/mcmt_192c_192t.qasm',
+    ('MCMT', 512): 'src/circuit/src/mcmt_256c_256t.qasm',
+    ('MCMT', 768): 'src/circuit/src/mcmt_384c_384t.qasm',
+    ('MCMT', 1024): 'src/circuit/src/mcmt_512c_512t.qasm',
+    # ('MCMT', 512): 'src/circuit/src/mcmt_256c_256t.qasm',
+}
+
 
 
 class QIG:
@@ -92,7 +142,6 @@ class QIG:
                     break
                 
         return contracted_graphes
-
 
     def __init__(self, ) -> None:
         self.qubits: Qubits = []
@@ -174,10 +223,23 @@ class QIG:
             squbits: list of number of qubits on each node in the graph
             """
             assert sum(mems) >= sum(sq for sq in squbits), "Total memory limit is less than total qubits"
-            sorted_qubits = sorted(squbits, reverse=True)
-            for mem, qubit in zip(mems, sorted_qubits):
-                if qubit > mem:
+            
+            mems = copy.deepcopy(mems)
+            squbits = copy.deepcopy(squbits)
+
+            while len(squbits) > 0:
+                mems.sort(reverse=True)
+                squbits.sort(reverse=True)
+                
+                if squbits[0] > mems[0]:
                     return False
+                else:
+                    mems[0] -= squbits[0]
+                    if mems[0] == 0:
+                        mems.pop(0)
+                        
+                    squbits.pop(0)
+
             return True
 
         if inplace:
@@ -209,7 +271,6 @@ class QIG:
             if candidate is None:
                 break
             contract_edge(graph, candidate[:2], inplace=True)
-
 
     def __contract_all_branches(self, k: int, mem_limit: int, pool_size: int) -> list[nx.Graph]:
         """
@@ -254,6 +315,22 @@ class QIG:
         draw(self.graph, edge_labels=edge_labels, node_labels=node_labels, filename=filename)
 
 
+    def analyze(self):
+        """
+        Analyze the QIG and print some statistics
+        """
+        num_nodes = len(self.graph.nodes)
+        num_edges = len(self.graph.edges)
+
+        components = list(nx.connected_components(self.graph))
+        num_components = len(components)
+        component_sizes = [len(c) for c in components]
+
+        print(f"Number of nodes: {num_nodes}")
+        print(f"Number of edges: {num_edges}")
+        print(f"Number of connected components: {num_components}")
+
+
 class RandomQIG(QIG):
     def __init__(self, 
             qubit_num: int=10,
@@ -287,20 +364,20 @@ class RandomQIG(QIG):
 
 
 if __name__ == '__main__':
-    qig = RandomQIG(64, 256, (1, 11))
-    copy_qig = copy.deepcopy(qig)
-    # qig = QIG.from_qasm('src/circuit/src/0410184_169.qasm')
-    mems = [16, 16, 12, 12, 8]
+    # qig = RandomQIG(64, 256, (1, 11))
+    # copy_qig = copy.deepcopy(qig)
+    qig = QIG.from_qasm('src/circuit/src/qaoa_16.qasm')
+    # mems = [16, 16, 12, 12, 8]
 
     # print(len(qig.graph.edges))
     # print(len(qig.graph.nodes))
 
     # qig.contract_greedy(8, inplace=True)
-    qig.contract_hdware_constrained(mems, inplace=True)
-    print(len(qig.graph.nodes))
+    # qig.contract_hdware_constrained(mems, inplace=True)
+    # print(len(qig.graph.nodes))
 
     # count the total qubits on each processor
-    total = 0
+    # total = 0
     # for node in qig.graph.nodes:
     #     qubit_num = len(qig.graph.nodes[node]['qubits'])
     #     total += qubit_num
@@ -309,4 +386,5 @@ if __name__ == '__main__':
     # for edge in qig.graph.edges(data=True):
     #     print('edge:', edge[:2], 'demand:', edge[2]['demand'])
 
+    qig.analyze()
     qig.draw('qig.png')

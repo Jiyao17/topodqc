@@ -6,7 +6,7 @@ import time
 
 from src.circuit import QIG, QASM_FILES, RandomQIG
 from src.solver import TACO, TACOORIG, TACONL, TACOL
-from src.scripts.runtime import test_solver
+from src.scripts.efficiency import test_solver
 
 def run_tests_small(folder = 'result/density/'):
     timeout = 120

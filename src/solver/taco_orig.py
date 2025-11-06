@@ -4,6 +4,8 @@
 import gurobipy as gp
 import numpy as np
 
+from src.solver.taco_l import TACOL
+
 from .taco import TACO
 from ..circuit.qig import QIG, RandomQIG
 from .type import ProcMemNum
@@ -41,22 +43,22 @@ class TACOORIG(TACO):
                                 y_expr += self.x[a, i] * self.x[b, j] + self.x[a, j] * self.x[b, i]
                     
                     # for start node i
-                    self.y[i, j] = self.model.addVar(vtype=gp.GRB.INTEGER, name=f'y_{i}_{j}')
-                    self.model.addConstr(self.y[i, j] == y_expr)
+                    self.y[i, j] = self.model.addVar(vtype=gp.GRB.INTEGER, name=f'y_{i}_{j}', lb=0, ub=self.mems[i]*self.mems[j])
+                    self.model.addConstr(self.y[i, j] == y_expr, name=f'y_def_{i}_{j}')
                     
                     oflow = gp.quicksum(self.p[i, j, i, u] for u in self.qpus if u != i)
                     iflow = gp.quicksum(self.p[i, j, u, i] for u in self.qpus if u != i)
-                    self.model.addConstr(self.y[i, j] * (oflow - iflow) == self.y[i, j])
+                    self.model.addConstr(self.y[i, j] * (oflow - iflow) == self.y[i, j], name=f'flow_start_{i}_{j}')
                     # for end node j
                     oflow = gp.quicksum(self.p[i, j, j, u] for u in self.qpus if u != j)
                     iflow = gp.quicksum(self.p[i, j, u, j] for u in self.qpus if u != j)
-                    self.model.addConstr(self.y[i, j] * (oflow - iflow) == -self.y[i, j])
+                    self.model.addConstr(self.y[i, j] * (oflow - iflow) == -self.y[i, j], name=f'flow_end_{i}_{j}')
                     # for intermediate nodes
                     for u in self.qpus:
                         if u != i and u != j:
                             oflow = gp.quicksum(self.p[i, j, u, v] for v in self.qpus if v != u)
                             iflow = gp.quicksum(self.p[i, j, v, u] for v in self.qpus if v != u)
-                            self.model.addConstr(oflow - iflow == 0)
+                            self.model.addConstr(oflow - iflow == 0, name=f'flow_inter_{i}_{j}_{u}')
                     
         # cancel no demand path
         for i in self.qpus:
@@ -69,7 +71,7 @@ class TACOORIG(TACO):
                                 usage += self.p[i, j, u, v] + self.p[i, j, v, u]
                                 # self.model.addConstr(self.p[i, j, u, v] <= self.y[i, j])
                                 # self.model.addConstr(self.p[i, j, v, u] <= self.y[i, j])
-                    self.model.addConstr(usage <= self.y[i, j] * (len(self.qpus) - 1))
+                    self.model.addConstr(usage <= self.y[i, j] * (len(self.qpus) - 1), name=f'no_demand_path_{i}_{j}')
 
     def add_topology_constrs(self):
         # total edge number in the topology
@@ -82,16 +84,17 @@ class TACOORIG(TACO):
                         for j in self.qpus:
                             if i < j:
                                 _w = self.model.addVar(vtype=gp.GRB.BINARY)
-                                self.model.addConstr(_w == (1 - self.p[i, j, u, v]) * (1 - self.p[i, j, v, u]))
+                                self.model.addConstr(_w == (1 - self.p[i, j, u, v]) * (1 - self.p[i, j, v, u]),
+                                                     name=f'edge_used_{i}_{j}_{u}_{v}')
                                 
                                 temp = self.model.addVar(vtype=gp.GRB.BINARY)
-                                self.model.addConstr(temp == prev * _w)
+                                self.model.addConstr(temp == prev * _w, name=f'edge_acc_{i}_{j}_{u}_{v}')
                                 
                                 prev = temp
 
                     total += 1 - prev
 
-        self.model.addConstr(total <= self.W)
+        self.model.addConstr(total <= self.W, name='total_edge_constr')
 
         # max adjacent edge for each processor
         for u in self.qpus:
@@ -103,18 +106,21 @@ class TACOORIG(TACO):
                         for j in self.qpus:
                             if i < j:
                                 _e = self.model.addVar(vtype=gp.GRB.BINARY)
-                                self.model.addConstr(_e == (1 - self.p[i, j, u, z]) * (1 - self.p[i, j, z, u]))
+                                self.model.addConstr(_e == (1 - self.p[i, j, u, z]) * (1 - self.p[i, j, z, u]),
+                                                     name=f'edge_used2_{i}_{j}_{u}_{z}')
                                 
                                 temp = self.model.addVar(vtype=gp.GRB.BINARY)
-                                self.model.addConstr(temp == unused * _e)
+                                self.model.addConstr(temp == unused * _e, name=f'edge_acc2_{i}_{j}_{u}_{z}')
                                 
                                 unused = temp
 
                     adj += 1 - unused
-            self.model.addConstr(adj <= self.comms[u])
+            self.model.addConstr(adj <= self.comms[u], name=f'comm_constr_{u}')
 
     def set_obj(self):
         total = 0
+        demand_ub = sum(self.c[a, b] for a in self.squbits for b in self.squbits if a < b and self.c[a, b] > 0)
+
         self.path_lens = {}
         for i in self.qpus:
             for j in self.qpus:
@@ -131,8 +137,8 @@ class TACOORIG(TACO):
                                 _demand += self.c[a, b] * self.x[a, i] * self.x[b, j] \
                                             + self.c[a, b] * self.x[b, i] * self.x[a, j]
 
-                    demand = self.model.addVar(vtype=gp.GRB.INTEGER)
-                    self.model.addConstr(demand == _demand)
+                    demand = self.model.addVar(vtype=gp.GRB.INTEGER, name=f'demand_{i}_{j}', lb=0, ub=demand_ub)
+                    self.model.addConstr(demand == _demand, name=f'demand_constr_{i}_{j}')
                     # self.model.addConstr(_demand >= demand)
 
                     total += path_len * demand
@@ -149,13 +155,13 @@ if __name__ == "__main__":
     np.random.seed(0)
     proc_num = 2
     mem = 4
-    comm = 4
+    comm = 2
 
     qubit_num = 8
-    demand_pair = int(qubit_num * (qubit_num-1) / 2) # max
+    # demand_pair = int(qubit_num * (qubit_num-1) / 2) # max
     # demand_pair = qubit_num * 2 # moderate
-    # qig = QIG.from_qasm('src/circuit/src/0410184_169.qasm')
-    qig = RandomQIG(qubit_num, demand_pair, (1, 11))
+    qig = QIG.from_qasm('src/circuit/src/grover_8.qasm')
+    # qig = RandomQIG(qubit_num, demand_pair, (1, 11))
     # qig.contract(4, inplace=True)
 
     mems = [mem] * proc_num
@@ -165,18 +171,11 @@ if __name__ == "__main__":
 
     model = TACOORIG(qig, mems, comms, W)
     model.build()
-    print(model.solve())
-
-    # print(model.qubits_sizes)
-    # print(model.c)
-    # print(model.procs)
+    model.model.update()
+    # print(model.solve())
 
 
-    # for a in model.qubits:
-    #     for i in model.procs:
-    #         print((a, i), model.x[a, i].x)
-    
-    # path_lengths = model.get_results()
-    # print(path_lengths)
-    # {(0, 1): 1.0, (0, 2): 1.0, (0, 3): 1.0, (1, 2): 1.0, (1, 3): 1.0, (2, 3): 0.0}
-    # {(0, 1): 0.0, (0, 2): 1.0, (0, 3): 1.0, (1, 2): 1.0, (1, 3): 1.0, (2, 3): 2.0}
+    from src.solver.qboson.sa import SASolver, TACOSA
+
+    sa = SASolver(process_num=16)
+    results = sa.solve(model.model, slack_bound=7, timeout=600)

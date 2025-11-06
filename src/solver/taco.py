@@ -16,6 +16,9 @@ class TACO:
     """
     Topology-Allocation Co-Optimization
     """
+
+    OBJ_VALS = []
+
     def callback(model: gp.Model, where=gp.GRB.Callback.MIPSOL):
         """
         callback function to record the objective values and time
@@ -24,24 +27,23 @@ class TACO:
             time = model.cbGet(gp.GRB.Callback.RUNTIME)
             obj = model.cbGet(gp.GRB.Callback.MIPSOL_OBJ)
 
-            with open('obj_vals.txt', 'w') as f:
-                f.write(f'{time}, {obj}\n')
+            TACO.OBJ_VALS.append((time, obj))
 
     def __init__(self, 
             qig: QIG, 
             mems: list[ProcMemNum], 
             comms: list[ProcCommNum],
             W: int,
-            edge_weights: dict[tuple[int, int], float]=None,
             timeout: int = 600
             ) -> None:
+        TACO.OBJ_VALS = []
+
         self.qig = qig
         # memory size of each processor
         self.mems = mems
         # communication qubit number of each processor
         self.comms = comms
         self.W = W
-        self.edge_weights = edge_weights
         self.timeout = timeout
 
         self.squbits = { a: node for a, node in enumerate(qig.graph.nodes) }
@@ -49,7 +51,7 @@ class TACO:
         self.squbits_sizes = { a: len(qig.graph.nodes[node]['qubits']) 
                                 for a, node in enumerate(qig.graph.nodes) }
         self.qpus = { i: mem for i, mem in enumerate(mems) }
-        self.qpus_rev = { mem: i for i, mem in enumerate(mems) }
+        # self.qpus_rev = { mem: i for i, mem in enumerate(mems) }
 
         self.edge_weights = {}
 
@@ -63,10 +65,8 @@ class TACO:
                         self.c[a, b] = 0
 
         self.model = gp.Model()
-        self.obj_vals = []
 
         self.model.setParam('TimeLimit', self.timeout)
-
 
     def build(self):
         pass
@@ -112,12 +112,12 @@ class TACO:
                 gp.quicksum(self.squbits_sizes[a] * self.x[a, i] for a in self.squbits) 
                     <= self.qpus[i],
                 name=f'proc_mem_constr_{i}')
-            
+
     def set_obj(self):
         pass
 
     def get_topology(self):
-        if len(self.obj_vals) == 0:
+        if len(TACO.OBJ_VALS) == 0:
             return None
         
         edges = []
@@ -133,8 +133,8 @@ class TACO:
         return edges
     
     def get_objs(self):
-        if len(self.obj_vals) == 0:
+        if len(TACO.OBJ_VALS) == 0:
             return None
         else:
-            return self.obj_vals
+            return TACO.OBJ_VALS
 

@@ -11,7 +11,8 @@
             // "module": "src.solver.original"
             // "module": "src.circuit.qig",
             // "module": "src.solver.qboson.sa",
-            "module": "src.solver.taco_l",
+            // "module": "src.solver.taco_l",
+            "module": "src.scripts.efficiency",
             "python": "${command:python.interpreterPath}"
 
         }
