@@ -209,7 +209,7 @@ class SASolver(object):
             timeout: int=300
             ):
         converter = Gurobi2Qubo(gurobi_model, slack_bound)
-        qubo_model: QuboModel = converter.convert(penalty=10)
+        qubo_model: QuboModel = converter.convert(penalty=100)
         Q = qubo_model.get_matrix()
         J, b = kw.core.qubo_matrix_to_ising_matrix(Q)
         print("qubo variables:", len(qubo_model.get_variables()))

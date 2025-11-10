@@ -35,19 +35,19 @@ def run_tests(folder = 'result/efficiency/'):
     # tasks = [ 'Grover' ]
     # tasks = [ 'MCMT' ]
 
-    sizes = [ 4, 8, ]
+    # sizes = [ 4, 8, ]
     # sizes = [ 32, 48, 64, 96 ]
     # sizes = [ 24, 32 ]
     # sizes = [ 64, 96 ]
     # sizes = [ 16 ]
     # sizes = [ 24 ]
     # sizes = [ 32 ]
-    # sizes = [ 96 ]
+    sizes = [ 96 ]
 
     clusters = {
         4: ([2,]*2, [2,]*2, 1),
         8: ([4,]*2, [3,]*2, 1),
-        16: ([4,]*4, [3,]*4, 5),
+        16: ([8,]*2, [3,]*4, 5),
         24: ([4,]*6, [3,]*6, 8),
         32: ([8,]*4, [3,]*4, 5),
         48: ([8,]*4 + [4,]*4, [3,]*8, 10),
@@ -239,7 +239,7 @@ def plot_efficiency(folder = 'result/efficiency/'):
     # tasks = [ 'QFT' ]
     # tasks = [ 'Grover' ]
 
-    sizes = [ 4, 8, ]
+    # sizes = [ 4, 8, ]
     # sizes = [ 16, 32, 64]
     # sizes = [ 48, 64, 96 ]
     # sizes = [128, 256, 384, 512, 768, 1024]
@@ -247,7 +247,7 @@ def plot_efficiency(folder = 'result/efficiency/'):
     # sizes = [16]
     # sizes = [32]
     # sizes = [ 64,]
-    # sizes = [ 96, ]
+    sizes = [ 96, ]
     # SolverClasses = [ TACOORIG, TACONL, TACOL, TACOSA ]
     SolverClasses = [ TACOORIG, TACONL, TACOL, ]
     # SolverClasses = [ TACOORIG, TACONL, ]

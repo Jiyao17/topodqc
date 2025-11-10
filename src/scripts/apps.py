@@ -98,7 +98,50 @@ def form_ANL() -> dict[tuple[int, int], float]:
             else:
                 # max value for non-existing links
                 # edge_weights[(i, j)] = sys.float_info.max
-                edge_weights[(i, j)] = 1e15
+                edge_weights[(i, j)] = 1e20
+
+    return edge_weights
+
+
+def form_ANL_linear_comm() -> dict[tuple[int, int], float]:
+    """
+    Form the ANL topology
+    """
+    sites = {
+        0: 'NU-Evanston',
+        1: 'StarLight',
+        2: 'UChicago-PME',
+        3: 'UChicago-HC',
+        4: 'Fermilab-1',
+        5: 'Fermilab-2',
+        6: 'Argonne-1',
+        7: 'Argonne-2',
+        8: 'Argonne-3',
+    }
+
+    distances = {
+        (0, 1): 20,
+        (1, 2): 16,
+        (1, 4): 66,
+        (1, 6): 54,
+        (2, 3): 2,
+        (2, 6): 42,
+        (4, 5): 2,
+        (4, 6): 53,
+        (6, 7): 0.1,
+        (6, 8): 41.8,
+    }
+    
+    
+    edge_weights = {}
+    for i in range(len(sites)):
+        for j in range(i+1, len(sites)):
+            if (i, j) in distances:
+                edge_weights[(i, j)] = distances[(i, j)]
+            else:
+                # max value for non-existing links
+                # edge_weights[(i, j)] = sys.float_info.max
+                edge_weights[(i, j)] = 1e5
 
     return edge_weights
 
@@ -121,7 +164,7 @@ def test_SwitchQN():
     # qig = QIG.from_qasm('src/circuit/src/0410184_169.qasm')
     # qig = QIG.from_qasm('src/circuit/src/grover_256.qasm')
     # qig = QIG.from_qasm('src/circuit/src/mcmt_128c_128t.qasm')
-    qig = QIG.from_qasm('src/circuit/src/qft_512.qasm')
+    qig = QIG.from_qasm('src/circuit/src/qft_1024.qasm')
     # qig.contract(4, inplace=True)
 
     # 1024, 570 second to contract
@@ -135,9 +178,12 @@ def test_SwitchQN():
     # comms = [16, 16, 8, 8, 4, 4, 4, 4]
     # 256 homogeneous
     mems = [64, ] * 16
-    comms = [2, ] * 16
-    W = 40
 
+    comm = 6
+    comms = [comm, ] * 16
+    W = 1000
+
+    # objs = [31153392.0, 24594416.0, 24577060.0, 24569824.0, 24566264.0]
 
 
     # mems = [32, 32, 16, 16, 8, 8, 8, 8]
@@ -177,7 +223,7 @@ def test_SwitchQN():
 
     edges = model.get_topology()
     # print(edges)
-    draw_topology(edges, filename='result/taco_pa_topology.png')
+    draw_topology(edges, filename=f'result/taco_pa_topology_switchqn-{comm}.png')
     # print(model.qubits_sizes)
     # print(model.c)
     # print(model.procs)
@@ -190,7 +236,8 @@ def test_ANL():
     # qig = QIG.from_qasm('src/circuit/src/grover_256.qasm')
     # qig = QIG.from_qasm('src/circuit/src/mcmt_128c_128t.qasm')
     # qig = QIG.from_qasm('src/circuit/src/qft_1024.qasm')
-    qig = QIG.from_qasm('src/circuit/src/qft_1536.qasm')
+    # qig = QIG.from_qasm('src/circuit/src/qft_1536.qasm')
+    qig = QIG.from_qasm('src/circuit/src/grover_1536.qasm')
     # qig = QIG.from_qasm('src/circuit/src/qft_2048.qasm')
 
     # qig.contract(4, inplace=True)
@@ -198,7 +245,7 @@ def test_ANL():
 
     mems = [256, ] * 9
     comms = [16, ] * 9
-    W = 10
+    W = 100
 
     edge_weights = form_ANL()
     print(edge_weights)
@@ -230,6 +277,95 @@ def test_ANL():
     # print(model.procs)
 
 
+
+def test_ANL_computation():
+
+    # qig = QIG.from_qasm('src/circuit/src/qft_1536.qasm')
+    qig = QIG.from_qasm('src/circuit/src/mcmt_768c_768t.qasm')
+
+
+
+    # mems = [256, 256, 256, 64, 256, 64, 256, 64, 64 ] 
+    mems = [256, 256, 256, 128, 256, 128, 256, 128, 128 ] 
+
+    comms = [16, ] * 9
+    W = 100
+
+    # edge_weights = form_ANL_linear_comm()
+    edge_weights = form_ANL()
+    print(edge_weights)
+
+    print("Pre-processing the graph by contraction...")
+    start_time = time.time()
+    qig.contract_hdware_constrained(mems, inplace=True)
+    # qig.contract_greedy(8, inplace=True)'
+    print(f"Contraction done in {time.time() - start_time:.2f} seconds.")
+
+    print("Building the model...")
+    start_time = time.time()
+    # model = TACOPA(qig, mems, comms, W, edge_weights)
+    model = TACOL(qig, mems, comms, W, edge_weights)
+    # model = TACOPA(qig, mems, comms, W)
+    model.build()
+    # model.model.addConstr(model.w[6, 7] == 1, name='fix_link_6_7')
+    print(f"Model built in {time.time() - start_time:.2f} seconds.")
+    print("Solving the model...")
+    start_time = time.time()
+    print(model.solve())
+    print(f"Model solved in {time.time() - start_time:.2f} seconds.")
+
+    edges = model.get_topology()
+    # print(edges)
+    draw_topology(edges, filename='result/taco_pa_topology_computation.png')
+    # print(model.qubits_sizes)
+    # print(model.c)
+    # print(model.procs)
+
+
+def test_ANL_comm():
+
+    # qig = QIG.from_qasm('src/circuit/src/qft_2048.qasm')
+    # qig = QIG.from_qasm('src/circuit/src/grover_2048.qasm')
+    qig = QIG.from_qasm('src/circuit/src/mcmt_768c_768t.qasm')
+
+
+    mems = [256, ] * 9
+    comms = [16, ] * 9
+    W = 100
+
+    edge_weights = form_ANL_linear_comm()
+    print(edge_weights)
+
+    print("Pre-processing the graph by contraction...")
+    start_time = time.time()
+    qig.contract_hdware_constrained(mems, inplace=True)
+    # qig.contract_greedy(8, inplace=True)'
+    print(f"Contraction done in {time.time() - start_time:.2f} seconds.")
+
+    print("Building the model...")
+    start_time = time.time()
+    # model = TACOPA(qig, mems, comms, W, edge_weights)
+    model = TACOL(qig, mems, comms, W, edge_weights)
+    # model = TACOPA(qig, mems, comms, W)
+    model.build()
+    # model.model.addConstr(model.w[6, 7] == 1, name='fix_link_6_7')
+    print(f"Model built in {time.time() - start_time:.2f} seconds.")
+    print("Solving the model...")
+    start_time = time.time()
+    print(model.solve())
+    print(f"Model solved in {time.time() - start_time:.2f} seconds.")
+
+    edges = model.get_topology()
+    # print(edges)
+    draw_topology(edges, filename='result/taco_pa_topology_comm.png')
+    # print(model.qubits_sizes)
+    # print(model.c)
+    # print(model.procs)
+
+
+
 if __name__ == "__main__":
     # test_ANL()
+    # test_ANL_computation()
+    # test_ANL_comm()
     test_SwitchQN()

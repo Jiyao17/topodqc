@@ -157,9 +157,9 @@ if __name__ == "__main__":
     # sizes = [256, 384, 512, 768, 1024]
     # sizes = [256, 384, 512]
     # sizes = [256*6, 256*8]
-    sizes = [192, ]
+    sizes = [1536, ]
     for size in sizes:
         # print(f"Generating circuits of size {size}...")
         mcmt_gen(size, circuit_folder)
-        qft_gen(size, circuit_folder)
-        grover_gen(size, circuit_folder)
+        # qft_gen(size, circuit_folder)
+        # grover_gen(size, circuit_folder)

@@ -34,7 +34,7 @@ class TACO:
             mems: list[ProcMemNum], 
             comms: list[ProcCommNum],
             W: int,
-            timeout: int = 600
+            timeout: int = 300
             ) -> None:
         TACO.OBJ_VALS = []
 

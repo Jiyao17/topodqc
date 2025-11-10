@@ -30,7 +30,7 @@ def test_solver(SolverClass, qig: QIG, mems: list, comms: list, W: int, edge_wei
     return objs, edges
 
 
-def run_tests_Ws(folder = 'result/efficiency/'):
+def run_tests_resources(folder = 'result/efficiency/'):
     timeout = 300
     np.random.seed(42)
 
@@ -66,10 +66,10 @@ def run_tests_Ws(folder = 'result/efficiency/'):
                 print(f'QIG size after contraction: {n_qubits} squbits, {len(qig.graph.edges)} edges')
                 print(f"Sizes of squbits: {sorted([len(qig.graph.nodes[node]['qubits']) for node in qig.graph.nodes], reverse=True)}")
 
-                objs, topo = test_solver(SolverClass, qig, mems, comms, W, None, timeout)
+                objs, topos = test_solver(SolverClass, qig, mems, comms, W, None, timeout)
 
-                with open(f'{folder}topo-{task}-64-{size}-{SolverClass.__name__}.pkl', 'wb') as f:
-                    pickle.dump(topo, f)
+                with open(f'{folder}objs-{task}-64-{size}-{SolverClass.__name__}.pkl', 'wb') as f:
+                    pickle.dump(objs, f)
 
 
                 print(f'Simulations for {task}-{size} with {SolverClass.__name__} done!')
@@ -78,7 +78,7 @@ def run_tests_Ws(folder = 'result/efficiency/'):
 
 
 
-def plot_topology(folder = 'result/efficiency/'):
+def plot_results(folder = 'result/efficiency/'):
     tasks = [ 'QFT', 'Grover', 'MCMT' ]
     # tasks = [ 'MCMT' ]
     # tasks = [ 'QFT' ]
@@ -105,70 +105,74 @@ def plot_topology(folder = 'result/efficiency/'):
     for size in sizes:
         for task in tasks:
             # one image for each task and size
-            # prepare plot style
+            plt.figure()
             plt.rcParams.update({'font.size': 18})
+            plt.subplots_adjust(left=0.16, right=0.98, top=0.95, bottom=0.16)
 
             for SolverClass, marker, name in zip(SolverClasses, markers, names):
-                edges_file = f'{folder}topo-{task}-64-{size}-{SolverClass.__name__}.pkl'
+                result_file = f'{folder}objs-{task}-64-{size}-{SolverClass.__name__}.pkl'
+                # objs: list of (time, obj)
+                if not os.path.exists(result_file):
+                    plt.plot([], label=name, marker=marker)
+                else:
+                    objs = pickle.load(open(result_file, 'rb'))
+                    if objs is None or len(objs) == 0:
+                        plt.plot([], label=name, marker=marker)
+                    else:
+                        plt.plot([o[0] for o in objs], [o[1] for o in objs], label=name, marker=marker)
 
-                # load topology (pickled list of (u,v) edges)
-                if not os.path.exists(edges_file):
-                    print(f'[plot_topology] topology file not found: {edges_file}')
-                    continue
+                    print(f'{task}-{size}-{name}:')
+                    print(objs)
 
-                with open(edges_file, 'rb') as f:
-                    topo = pickle.load(f)
+                    mat[sizes.index(size), tasks.index(task)] = objs[-1][1]
 
-                if topo is None:
-                    print(f'[plot_topology] empty topology in: {edges_file}')
-                    continue
+    # plot grouped bar chart using the collected matrix `mat`
+    # mat shape: (n_sizes, n_tasks)
+    n_tasks = len(tasks)
+    n_sizes = len(sizes)
 
-                # The hardware graph always contains 8 vertices. Place them as a regular octagon.
-                n = 8
-                angles = np.linspace(0, 2 * np.pi, n, endpoint=False)
-                radius = 1.0
-                xs = radius * np.cos(angles)
-                ys = radius * np.sin(angles)
-                pos = {i: (xs[i], ys[i]) for i in range(n)}
+    # Use a narrower figure suitable for IEEE double-column layouts
+    # slightly narrower figure; we'll tighten spacing between task groups below
+    plt.figure(figsize=(5.5, 3.5))
+    plt.rcParams.update({'font.size': 12})
 
-                fig, ax = plt.subplots(figsize=(6, 6))
-                ax.set_aspect('equal')
+    # reduce the space between task groups by using a group_gap < 1.0
+    group_gap = 0.6
+    index = np.arange(n_tasks) * group_gap
+    # choose a smaller bar width so bars within a group don't overlap
+    bar_width = 0.15
 
-                # draw edges
-                for e in topo:
-                    try:
-                        u, v = e
-                    except Exception:
-                        # unexpected format
-                        continue
+    cmap = plt.get_cmap('tab10')
+    colors = [cmap(i) for i in range(n_sizes)]
 
-                    if not (isinstance(u, int) and isinstance(v, int)):
-                        continue
-                    if u < 0 or v < 0 or u >= n or v >= n:
-                        # skip invalid indices
-                        continue
+    for s_idx in range(n_sizes):
+        positions = index + (s_idx - (n_sizes - 1) / 2) * bar_width
+        vals = mat[s_idx, :]
+        # vals may contain nan for missing results; matplotlib will leave gaps
+        plt.bar(positions, vals, bar_width, label=f'W={sizes[s_idx]}', color=colors[s_idx], edgecolor='black')
 
-                    xvals = [pos[u][0], pos[v][0]]
-                    yvals = [pos[u][1], pos[v][1]]
-                    ax.plot(xvals, yvals, color='k', linewidth=2, zorder=1)
+    plt.xlabel('Task')
+    plt.ylabel('Final objective value')
+    plt.title('Final solver objective by task and resource size')
+    plt.xticks(index, tasks)
+    plt.legend(title='Sparsity')
+    plt.tight_layout()
 
-                # draw nodes
-                ax.scatter(xs, ys, s=220, facecolor='C0', edgecolor='k', zorder=2)
-                for i in range(n):
-                    x, y = pos[i]
-                    # label slightly outside the node
-                    ax.text(x * 1.12, y * 1.12, str(i), ha='center', va='center')
+    # tighten x-limits so there's less empty space at the sides
+    group_width = n_sizes * bar_width
+    plt.xlim(index[0] - group_width, index[-1] + group_width)
 
-                # ax.set_title(f'{task} size={size} {SolverClass.__name__}')
-                ax.set_axis_off()
+    os.makedirs(folder, exist_ok=True)
+    out_file = os.path.join(folder, 'comp_sparsity.png')
+    # save with tight bbox and high DPI for publication-quality embedding
+    plt.savefig(out_file, bbox_inches='tight', dpi=300)
+    print(f'Grouped bar plot saved to {out_file}')
+    plt.show()
 
-                out_png = edges_file.replace('.pkl', '.png')
-                fig.savefig(out_png, dpi=200, bbox_inches='tight')
-                plt.close(fig)
-                print(f'[plot_topology] saved topology image: {out_png}')
 
 
 if __name__ == '__main__':
-    # run_tests_Ws()
+    # run_tests_resources()
+    # plot_efficiency_resources()
 
-    plot_topology()
+    plot_results()

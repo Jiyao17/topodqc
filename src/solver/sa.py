@@ -12,7 +12,7 @@ from .type import ProcMemNum
 
 
 
-class TACOL(TACO):
+class TACOLSA(TACO):
     
     def __init__(self, 
             qig: QIG, 
@@ -20,7 +20,7 @@ class TACOL(TACO):
             comms: list[ProcMemNum], 
             W: int,
             edge_weights: dict[tuple[int, int], float]=None,
-            timeout: int = 300
+            timeout: int = 600
             ) -> None:
         super().__init__(qig, mems, comms, W, timeout)
 
@@ -35,10 +35,20 @@ class TACOL(TACO):
     def build(self):
         self.add_vars()
         self.add_alloc_constrs()
-        self.add_path_constrs()
-        self.add_topology_constrs()
+        # self.add_path_constrs()
+        # self.add_topology_constrs()
+
         self.set_obj()
 
+            
+    def add_vars(self):
+        # x[a][i] = 1 if node a is allocated to processor i
+        self.x = {}
+        for a in self.squbits:
+            for i in self.qpus:
+                self.x[a, i] = self.model.addVar(vtype=gp.GRB.BINARY, name=f'x_{a}_{i}')
+
+    
     def add_path_constrs(self):
         # each node is allocated to exactly one processor
         self.y = {}
@@ -136,13 +146,6 @@ class TACOL(TACO):
         for i in self.qpus:
             for j in self.qpus:
                 if i < j:
-                    path_weight = 0
-                    for u in self.qpus:
-                        for v in self.qpus:
-                            if u < v:
-                                weight = self.edge_weights[u, v] if self.edge_weights is not None else 1
-                                path_weight += (self.p[i, j, u, v] + self.p[i, j, v, u]) * weight
-                    
                     _demand = 0
                     for a in self.squbits:
                         for b in self.squbits:
@@ -150,11 +153,7 @@ class TACOL(TACO):
                                 _demand += self.c[a, b] * self.x[a, i] * self.x[b, j] \
                                             + self.c[a, b] * self.x[b, i] * self.x[a, j]
 
-                    demand = self.model.addVar(vtype=gp.GRB.INTEGER, name=f'demand_{i}_{j}', lb=0, ub=demand_ub)
-                    self.model.addConstr(demand == _demand, name=f'demand_constr_{i}_{j}')
-                    # self.model.addConstr(_demand >= demand)
-
-                    total += path_weight * demand
+                    total += _demand
 
         self.model.setObjective(total, gp.GRB.MINIMIZE)
 
@@ -171,18 +170,16 @@ class TACOL(TACO):
 if __name__ == "__main__":
     np.random.seed(0)
     proc_num = 2
-    mem = 4
+    mem = 8
     comm = 1
 
     qubit_num = proc_num * mem
-    # demand_pair = int(qubit_num * (qubit_num-1) / 2) # max
-    # demand_pair = int(qubit_num * (qubit_num-1) / 6) # max
-    # demand_pair = qubit_num * 2 # moderate
 
     # qig = RandomQIG(qubit_num, demand_pair, (1, 11))
     # print(sorted(qig.demands))
-    # qig = QIG.from_qasm('src/circuit/src/mcmt_2c_2t.qasm')
-    qig = QIG.from_qasm('src/circuit/src/grover_8.qasm')
+    # qig = QIG.from_qasm('src/circuit/src/mcmt_4c_4t.qasm')
+    qig = QIG.from_qasm('src/circuit/src/grover_16.qasm')
+    # qig = QIG.from_qasm('src/circuit/src/qft_8.qasm')
     # qig.contract(4, inplace=True)
 
     # 256 homogeneous
@@ -197,7 +194,8 @@ if __name__ == "__main__":
     # comms = [8, 8, 4, 4, 4, 4]
     # mems = [8, 8, 4, 4, 4, 4]
     # comms = [4, 4, 4, 4, 4, 4]
-    W = int(proc_num * (proc_num-1) / 2)
+    # W = int(proc_num * (proc_num-1) / 2)
+    W = 1
     # W = 1e6
     # W = (proc_num - 1)
     # W = proc_num  + 1
@@ -208,55 +206,11 @@ if __name__ == "__main__":
     from src.solver.qboson.sa import SASolver, TACOSA
 
     sa = SASolver(process_num=16)
-    tacol = TACOL(qig, mems, comms, W,)
+    tacol = TACOLSA(qig, mems, comms, W,)
     tacol.build()
     tacol.model.update()
     # results = sa.solve(tacol.model, slack_bound=max(proc_num, mem*mem), timeout=600)
-    results = sa.solve(tacol.model, slack_bound=3, timeout=300)
+    results = sa.solve(tacol.model, slack_bound=8, timeout=3600)
     # tacosa = TACOSA(qig, mems, comms, W,)
     # tacosa.build()
     # tacosa.solve()
-
-    # tacol = TACOL(qig, mems, comms, W,)
-    # tacol.build()
-    # tacol.model.update()
-
-    # print("var num:", tacol.model.numVars)
-    # print("constr num:", tacol.model.numConstrs)
-    # print(tacol.solve())
-
-    # set all edge variables w to the solution
-    # for u in tacol.qpus:
-    #     for v in tacol.qpus:
-    #         if u < v:
-    #             # print((u, v), tacol.w[u, v].x)
-    #             if tacol.w[u, v].x > 0.5:
-    #                 tacol.model.addConstr(tacol.w[u, v] == 1, name=f'fix_w_{u}_{v}')
-    #             else:
-    #                 tacol.model.addConstr(tacol.w[u, v] == 0, name=f'fix_w_{u}_{v}')
-    # tacol.model.update()
-
-    # print(model.qubits_sizes)
-    # print(model.c)
-    # print(model.procs)
-
-    # for a in model.qubits:
-    #     for i in model.procs:
-    #         print((a, i), model.x[a, i].x)
-    
-    # path_lengths = model.get_results()
-    # print(path_lengths)
-
-    # check var types
-    # for v in tacol.model.getVars():
-    #     assert v.VType in [gp.GRB.BINARY], f"Var {v.VarName} has type {v.VType}, expected BINARY"
-    # sa = SASolver(process_num=1)
-    # slack_bound = max(proc_num, mem)
-    # best_vals = sa.solve(
-    #     tacol.model, 
-    #     slack_bound=slack_bound, 
-    #     timeout=600
-    #     )
-    # print("Best values over time (time, obj, violation):")
-    # print(best_vals)
-
