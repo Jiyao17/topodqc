@@ -7,7 +7,7 @@ import time
 import matplotlib.pyplot as plt
 
 from src.circuit import QIG, QASM_FILES, RandomQIG
-from src.solver import TACO, TACOORIG, TACONL, TACOL, TACOSA, TACOPA
+from src.solver import TACO, TACOORIG, TACONL, TACOL, TACOPA
 
 
 def test_solver(SolverClass, qig: QIG, mems: list, comms: list, W: int, edge_weights: dict[tuple[int, int], float]=None, timeout: int=600):
@@ -39,15 +39,15 @@ def run_tests(folder = 'result/efficiency/'):
     # sizes = [ 32, 48, 64, 96 ]
     # sizes = [ 24, 32 ]
     # sizes = [ 64, 96 ]
-    # sizes = [ 16 ]
+    sizes = [ 16 ]
     # sizes = [ 24 ]
     # sizes = [ 32 ]
-    sizes = [ 96 ]
+    # sizes = [ 96 ]
 
     clusters = {
         4: ([2,]*2, [2,]*2, 1),
         8: ([4,]*2, [3,]*2, 1),
-        16: ([8,]*2, [3,]*4, 5),
+        16: ([4,]*4, [3,]*4, 5),
         24: ([4,]*6, [3,]*6, 8),
         32: ([8,]*4, [3,]*4, 5),
         48: ([8,]*4 + [4,]*4, [3,]*8, 10),
@@ -246,10 +246,11 @@ def plot_efficiency(folder = 'result/efficiency/'):
     # sizes = [128, 256, 384, 512]
     # sizes = [16]
     # sizes = [32]
-    # sizes = [ 64,]
-    sizes = [ 96, ]
+    sizes = [ 64,]
+    # sizes = [ 96, ]
     # SolverClasses = [ TACOORIG, TACONL, TACOL, TACOSA ]
     SolverClasses = [ TACOORIG, TACONL, TACOL, ]
+    names = ['TACO', 'TACO-NL', 'TACO-L']
     # SolverClasses = [ TACOORIG, TACONL, ]
 
     markers = ['o', 's', '^', 'x', '*', 'D', 'v', 'P']
@@ -261,20 +262,22 @@ def plot_efficiency(folder = 'result/efficiency/'):
             plt.rcParams.update({'font.size': 18})
             plt.subplots_adjust(left=0.16, right=0.98, top=0.95, bottom=0.16)
 
-            for SolverClass, marker in zip(SolverClasses, markers):
+            for SolverClass, marker, name in zip(SolverClasses, markers, names):
                 result_file = f'{folder}objs-{task}-{size}-{SolverClass.__name__}.pkl'
                 # objs: list of (time, obj)
                 objs = pickle.load(open(result_file, 'rb'))
                 if objs is None or len(objs) == 0:
-                    plt.plot([], label=SolverClass.__name__, marker=marker)
+                    plt.plot([], label=name, marker=marker)
                 else:
-                    plt.plot([o[0] for o in objs], [o[1] for o in objs], label=SolverClass.__name__, marker=marker)
+                    plt.plot([o[0] for o in objs], [o[1] for o in objs], label=name, marker=marker)
 
-                print(f'{task}-{size}-{SolverClass.__name__}:')
+                print(f'{task}-{size}-{name}:')
                 print(objs)
-            plt.title(f'{task} - {size}')
+            # plt.title(f'{task} - {size}')
             plt.xlabel('Time')
             plt.ylabel('Objective Value')
+            # scientific notation for y axis
+            plt.ticklabel_format(axis="y", style="sci", scilimits=(0,0))
             plt.legend()
             plt.savefig(f'{folder}plot-{task}-{size}.png')
             plt.clf()
