@@ -3,8 +3,12 @@
 The official implementation of the paper 
 
 **Handling Qubit Allocation and Topology Design at Scale for Distributed  Quantum Computing**   
-Jiyao Liu, Lei Fan, Yuanxiong Guo, Zhu Han, and Yu Wang  
-Under Review  
+Jiyao Liu, Lei Fan, Yuanxiong Guo, Zhu Han, and Yu Wang.  
+IEEE Transactions on Networking, 2026  
+
+**Co-Design of Network Topology and Qubit Allocation for Distributed Quantum Computing**  
+Jiyao Liu, Lei Fan, Yuanxiong Guo, Zhu Han, and Yu Wang.
+International Conference on Quantum Communications, Networking, and Computing (QCNC 2025)  
 
 ## Graph-partitioning baseline
 
