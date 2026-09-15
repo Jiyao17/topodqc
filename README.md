@@ -7,7 +7,7 @@ Jiyao Liu, Lei Fan, Yuanxiong Guo, Zhu Han, and Yu Wang.
 IEEE Transactions on Networking, 2026  
 
 **Co-Design of Network Topology and Qubit Allocation for Distributed Quantum Computing**  
-Jiyao Liu, Lei Fan, Yuanxiong Guo, Zhu Han, and Yu Wang.
+Jiyao Liu, Lei Fan, Yuanxiong Guo, Zhu Han, and Yu Wang.  
 International Conference on Quantum Communications, Networking, and Computing (QCNC 2025)  
 
 ## Graph-partitioning baseline
