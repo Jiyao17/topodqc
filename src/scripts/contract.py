@@ -7,11 +7,11 @@ import time
 import matplotlib.pyplot as plt
 
 from src.circuit import QIG, QASM_FILES, RandomQIG
-from src.solver import TACO, TACOORIG, TACONL, TACOL, TACOSA, TACOPA
+from src.solver import TACO, TACOORIG, TACONL, TACOL, TACOPA
 
 
 def test_solver(SolverClass, qig: QIG, mems: list, comms: list, W: int, edge_weights: dict[tuple[int, int], float]=None, timeout: int=600):
-    assert SolverClass in [TACOORIG, TACONL, TACOL, TACOSA, TACOPA]
+    assert SolverClass in [TACOORIG, TACONL, TACOL, TACOPA]
     if SolverClass == TACOL or SolverClass == TACOPA:
         solver: TACO = SolverClass(qig, mems, comms, W, edge_weights, timeout)
     else:
@@ -26,7 +26,18 @@ def test_solver(SolverClass, qig: QIG, mems: list, comms: list, W: int, edge_wei
     return objs, edges
 
 
-def run_tests_contracted(folder = 'result/efficiency/'):
+def preprocess_qig(qig: QIG, mems: list[int], method: str = 'EC') -> None:
+    """Apply a selectable QIG preprocessing method in place."""
+    method = method.upper()
+    if method == 'EC':
+        qig.contract_hdware_constrained(mems=mems, inplace=True)
+    elif method == 'KL':
+        qig.partition_kernighan_lin(mems=mems, inplace=True)
+    else:
+        raise ValueError(f"Unknown preprocessing method: {method}. Use 'EC' or 'KL'.")
+
+
+def run_tests_contracted(folder = 'result/efficiency/', preprocess_method: str = 'EC'):
     timeout = 300
     np.random.seed(42)
 
@@ -80,17 +91,21 @@ def run_tests_contracted(folder = 'result/efficiency/'):
             qig = QIG.from_qasm(qasm_file)
             cluster = clusters[size]
             mems, comms, W = cluster
-            qig.contract_hdware_constrained(mems=mems, inplace=True)
+            preprocess_qig(qig, mems, preprocess_method)
 
             for SolverClass in SolverClasses:
-                print(f'Simulations for {task}-{size} with {SolverClass.__name__} running...')
+                print(
+                    f'Simulations for {task}-{size} with {SolverClass.__name__} '
+                    f'and {preprocess_method.upper()} running...'
+                )
                 n_qubits = len(qig.graph.nodes)
-                print(f'QIG size after contraction: {n_qubits} squbits, {len(qig.graph.edges)} edges')
+                print(f'QIG size after preprocessing: {n_qubits} squbits, {len(qig.graph.edges)} edges')
                 print(f"Sizes of squbits: {sorted([len(qig.graph.nodes[node]['qubits']) for node in qig.graph.nodes], reverse=True)}")
 
                 objs, topos = test_solver(SolverClass, qig, mems, comms, W, None, timeout)
 
-                with open(f'{folder}objs-{task}-{size}-{SolverClass.__name__}.pkl', 'wb') as f:
+                method_suffix = '' if preprocess_method.upper() == 'EC' else f'-{preprocess_method.upper()}'
+                with open(f'{folder}objs-{task}-{size}-{SolverClass.__name__}{method_suffix}.pkl', 'wb') as f:
                     pickle.dump(objs, f)
 
 
@@ -203,5 +218,3 @@ if __name__ == "__main__":
     # run_tests_contracted()
     plot_efficiency_contracted()
     
-
-

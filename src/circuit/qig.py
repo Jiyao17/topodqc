@@ -1,6 +1,7 @@
 
-from collections import OrderedDict
+from collections import Counter, OrderedDict
 import copy
+import heapq
 
 import numpy as np
 import networkx as nx
@@ -217,29 +218,25 @@ class QIG:
         similar to contract_greedy, but now comply with the mems constraints.
         """
 
-        def comply(mems: list[int], squbits: list[int]) -> bool:
+        def comply(capacities: list[int], size_counts: Counter) -> bool:
             """
-            mems: list of memory limits for each processor
-            squbits: list of number of qubits on each node in the graph
+            Greedily place the largest superqubits into the QPU with the
+            largest remaining capacity. This is equivalent to repeatedly
+            sorting both lists in the original implementation, but uses one
+            group-size sort and a max heap for the remaining capacities.
             """
-            assert sum(mems) >= sum(sq for sq in squbits), "Total memory limit is less than total qubits"
-            
-            mems = copy.deepcopy(mems)
-            squbits = copy.deepcopy(squbits)
-
-            while len(squbits) > 0:
-                mems.sort(reverse=True)
-                squbits.sort(reverse=True)
-                
-                if squbits[0] > mems[0]:
-                    return False
-                else:
-                    mems[0] -= squbits[0]
-                    if mems[0] == 0:
-                        mems.pop(0)
-                        
-                    squbits.pop(0)
-
+            remaining = [-capacity for capacity in capacities]
+            heapq.heapify(remaining)
+            for size, count in sorted(size_counts.items(), reverse=True):
+                for _ in range(count):
+                    if not remaining:
+                        return False
+                    capacity = -heapq.heappop(remaining)
+                    if size > capacity:
+                        return False
+                    capacity -= size
+                    if capacity:
+                        heapq.heappush(remaining, -capacity)
             return True
 
         if inplace:
@@ -247,30 +244,217 @@ class QIG:
         else:
             graph = copy.deepcopy(self.graph)
 
+        sizes = {
+            node: len(graph.nodes[node]['qubits'])
+            for node in graph.nodes
+        }
+        assert sum(mems) >= sum(sizes.values()), \
+            "Total memory limit is less than total qubits"
+        size_counts = Counter(sizes.values())
+
         # group most interacting qubits by merging two nodes in QIG
         while True:
-            # sort edges by weight
-            edges = sorted(graph.edges(data=True), key=lambda x: x[2]['demand'], reverse=True)
+            # A linear-time heap construction replaces sorting all edges. The
+            # enumeration index preserves the original implementation's stable
+            # tie order for equal-demand edges.
+            edge_heap = [
+                (-data['demand'], order, (src, dst))
+                for order, (src, dst, data) in enumerate(graph.edges(data=True))
+            ]
+            heapq.heapify(edge_heap)
             # if exceed mem_num after merging, try the next edge
             candidate = None
-            for edge in edges:
-                p1, p2 = edge[:2]
-                # qubits1 = graph.nodes[p1]['qubits']
-                # qubits2 = graph.nodes[p2]['qubits']
-                # if cannot comply with the memory limits, try the next edge
-                squbits = { q: len(graph.nodes[q]['qubits']) for q in graph.nodes }
-                squbits[p1] = squbits[p1] + squbits[p2]  # merge the two nodes
-                squbits.pop(p2, None)  # remove the second node, as it will be merged
-                squbits = list(squbits.values())
-                if not comply(mems, squbits):
+            # Within one contraction iteration, any two edges whose endpoint
+            # groups have the same sizes produce the same feasibility problem.
+            feasibility_cache = {}
+            while edge_heap:
+                _, _, (p1, p2) = heapq.heappop(edge_heap)
+
+                size1, size2 = sizes[p1], sizes[p2]
+                cache_key = (min(size1, size2), max(size1, size2))
+                feasible = feasibility_cache.get(cache_key)
+                if feasible is None:
+                    candidate_counts = size_counts.copy()
+                    candidate_counts[size1] -= 1
+                    candidate_counts[size2] -= 1
+                    candidate_counts[size1 + size2] += 1
+                    candidate_counts += Counter()  # discard zero counts
+                    feasible = comply(mems, candidate_counts)
+                    feasibility_cache[cache_key] = feasible
+
+                if not feasible:
                     continue
-                else:
-                    candidate = edge
-                    break
+                candidate = (p1, p2)
+                break
             # no edge can be merged
             if candidate is None:
                 break
-            contract_edge(graph, candidate[:2], inplace=True)
+
+            p1, p2 = candidate
+            size1, size2 = sizes[p1], sizes[p2]
+            contract_edge(graph, (p1, p2), inplace=True)
+
+            size_counts[size1] -= 1
+            size_counts[size2] -= 1
+            size_counts[size1 + size2] += 1
+            size_counts += Counter()
+            sizes[p1] = size1 + size2
+            del sizes[p2]
+
+        return graph
+
+    def partition_kernighan_lin(
+            self,
+            mems: list[int],
+            inplace: bool = False,
+            seed: int = 42,
+            max_iter: int = 10,
+            ) -> nx.Graph:
+        """Partition an uncontracted QIG with recursive Kernighan--Lin.
+
+        This provides a conventional graph-partitioning baseline for the
+        proposed greedy edge-contraction preprocessor.  Each edge is weighted
+        by its CNOT demand, so Kernighan--Lin minimizes the demand crossing
+        partitions.  Partition sizes are selected subject to the QPU memory
+        capacities in ``mems``; the resulting partitions are then represented
+        as superqubits and can be passed to the existing TACO solvers without
+        any solver changes.
+
+        The method is intended as an alternative first preprocessing step and
+        therefore expects the original QIG (one logical qubit per graph node).
+        """
+        if not mems:
+            raise ValueError("At least one QPU memory capacity is required.")
+        if any(not isinstance(mem, (int, np.integer)) or mem <= 0 for mem in mems):
+            raise ValueError("All QPU memory capacities must be positive integers.")
+        if max_iter <= 0:
+            raise ValueError("max_iter must be positive.")
+
+        graph = self.graph
+        if graph is None:
+            raise ValueError("QIG graph is not initialized.")
+        if graph.number_of_nodes() == 0:
+            partitioned = copy.deepcopy(graph)
+            if inplace:
+                self.graph = partitioned
+            return partitioned
+
+        node_sizes = {
+            node: len(graph.nodes[node].get('qubits', []))
+            for node in graph.nodes
+        }
+        if any(size != 1 for size in node_sizes.values()):
+            raise ValueError(
+                "Kernighan-Lin partitioning must be applied to an uncontracted "
+                "QIG (one logical qubit per node)."
+            )
+
+        qubit_num = graph.number_of_nodes()
+        if sum(mems) < qubit_num:
+            raise ValueError("Total QPU memory is less than the number of logical qubits.")
+
+        # Allocate a capacity-feasible target size to each non-empty partition.
+        # Filling the least utilized QPU first balances utilization while still
+        # supporting heterogeneous QPU capacities and spare total capacity.
+        capacities = list(mems)
+        target_sizes = [0] * len(capacities)
+        for _ in range(qubit_num):
+            candidates = [
+                idx for idx, capacity in enumerate(capacities)
+                if target_sizes[idx] < capacity
+            ]
+            idx = min(
+                candidates,
+                key=lambda candidate: (
+                    target_sizes[candidate] / capacities[candidate],
+                    -capacities[candidate],
+                    candidate,
+                ),
+            )
+            target_sizes[idx] += 1
+        target_sizes = sorted(
+            (size for size in target_sizes if size > 0),
+            reverse=True,
+        )
+
+        rng = np.random.default_rng(seed)
+
+        def recursive_partition(subgraph: nx.Graph, sizes: list[int]) -> list[set]:
+            if len(sizes) == 1:
+                return [set(subgraph.nodes)]
+
+            # Split the requested partition sizes into two groups whose total
+            # vertex counts are as even as possible.
+            total = sum(sizes)
+            prefix = 0
+            split_at = 1
+            best_difference = total
+            for idx in range(1, len(sizes)):
+                prefix += sizes[idx - 1]
+                difference = abs(total - 2 * prefix)
+                if difference < best_difference:
+                    best_difference = difference
+                    split_at = idx
+
+            left_sizes = sizes[:split_at]
+            right_sizes = sizes[split_at:]
+            left_count = sum(left_sizes)
+
+            nodes = list(subgraph.nodes)
+            rng.shuffle(nodes)
+            initial_partition = (set(nodes[:left_count]), set(nodes[left_count:]))
+
+            if subgraph.number_of_edges() == 0:
+                left, right = initial_partition
+            else:
+                left, right = nx.community.kernighan_lin_bisection(
+                    subgraph,
+                    partition=initial_partition,
+                    max_iter=max_iter,
+                    weight='demand',
+                    seed=seed,
+                )
+                # NetworkX labels the two returned sides independently of the
+                # order in ``initial_partition``.  Restore the requested side
+                # sizes before recursing, which matters for heterogeneous QPUs.
+                if len(left) != left_count:
+                    left, right = right, left
+                if len(left) != left_count:
+                    raise RuntimeError("Kernighan-Lin changed the requested partition sizes.")
+
+            return (
+                recursive_partition(subgraph.subgraph(left).copy(), left_sizes)
+                + recursive_partition(subgraph.subgraph(right).copy(), right_sizes)
+            )
+
+        partitions = recursive_partition(graph, target_sizes)
+
+        # Convert the partition into the same superqubit representation used by
+        # edge contraction.  Demands between the same two partitions are summed.
+        partitioned = nx.Graph()
+        membership = {}
+        for partition in partitions:
+            representative = min(partition)
+            qubits = []
+            for node in sorted(partition):
+                membership[node] = representative
+                qubits.extend(graph.nodes[node]['qubits'])
+            partitioned.add_node(representative, qubits=qubits)
+
+        for src, dst, data in graph.edges(data=True):
+            src_partition = membership[src]
+            dst_partition = membership[dst]
+            if src_partition == dst_partition:
+                continue
+            demand = data.get('demand', 0)
+            if partitioned.has_edge(src_partition, dst_partition):
+                partitioned[src_partition][dst_partition]['demand'] += demand
+            else:
+                partitioned.add_edge(src_partition, dst_partition, demand=demand)
+
+        if inplace:
+            self.graph = partitioned
+        return partitioned
 
     def __contract_all_branches(self, k: int, mem_limit: int, pool_size: int) -> list[nx.Graph]:
         """
